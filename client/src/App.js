@@ -319,10 +319,10 @@ const CheckInApp = () => {
     // Kiểm tra lần đầu và thử làm mới nếu cần
     checkAuthStatus(true);
     
-    // Kiểm tra định kỳ mỗi 5 phút
+    // Kiểm tra định kỳ mỗi 2 phút
     const interval = setInterval(() => {
       checkAuthStatus(true);
-    }, 5 * 60 * 1000);
+    }, 2 * 60 * 1000);
     
     return () => clearInterval(interval);
   }, []);
@@ -897,7 +897,7 @@ const CheckInApp = () => {
       
       // Tạo khóa cấu hình OAuth cho tài khoản này
       const oauthConfigKey = appName 
-        ? `hanet_oauth_config_${appName.toLowerCase().replace(/[^a-z0-9]/g, '_')}` 
+        ? `hanet_oauth_config_${appName.toLowerCase().replace(/[^a-z0-9]/g, '_')}`
         : currentOAuthConfigKey;
       
       // Tạo tài khoản mới
