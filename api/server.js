@@ -638,6 +638,69 @@ app.get("/api/oauth/config", (req, res) => {
   }
 });
 
+// API làm mới token OAuth
+app.post("/api/oauth/refresh", async (req, res) => {
+  try {
+    const { refreshToken, clientId, clientSecret } = req.body;
+    
+    if (!refreshToken || !clientId || !clientSecret) {
+      return res.status(400).json({
+        success: false,
+        message: "Thiếu thông tin cần thiết để làm mới token"
+      });
+    }
+    
+    // Gọi API của Hanet để làm mới token
+    const response = await fetch('https://oauth.hanet.com/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+        client_id: clientId,
+        client_secret: clientSecret
+      })
+    });
+    
+    const result = await response.json();
+    
+    if (result.access_token) {
+      // Lưu token mới vào MongoDB nếu có
+      try {
+        await mongodbStorage.saveTokens({
+          accessToken: result.access_token,
+          refreshToken: result.refresh_token || refreshToken,
+          expiresIn: result.expires_in,
+          tokenType: result.token_type,
+          scope: result.scope
+        });
+      } catch (dbError) {
+        console.error("Lỗi khi lưu token mới vào MongoDB:", dbError);
+      }
+      
+      return res.status(200).json({
+        success: true,
+        data: {
+          accessToken: result.access_token,
+          refreshToken: result.refresh_token,
+          expiresIn: result.expires_in
+        }
+      });
+    } else {
+      throw new Error(result.error_description || 'Không thể làm mới token');
+    }
+  } catch (error) {
+    console.error("Lỗi khi làm mới token:", error);
+    return res.status(401).json({
+      success: false,
+      error: 'Token refresh failed',
+      message: error.message
+    });
+  }
+});
+
 // 4. Error Handling Middleware
 const handleApiError = (err, req, res, next) => {
   console.error(`Lỗi trong route ${req.path}:`, err.message);
