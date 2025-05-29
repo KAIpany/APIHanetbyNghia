@@ -7,6 +7,7 @@ const hanetServiceId = require("./hanetServiceId");
 const cors = require("cors");
 const tokenManager = require("./tokenManager");
 const crypto = require('crypto');
+const mongodbStorage = require('./mongodbStorage');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -331,9 +332,9 @@ app.get("/api/checkins", validateCheckinParams, async (req, res, next) => {
 });
 
 // API cấu hình OAuth
-app.post("/api/oauth/config", (req, res) => {
+app.post("/api/oauth/config", async (req, res) => {
   try {
-    const { clientId, clientSecret, refreshToken, baseUrl, tokenUrl } = req.body;
+    const { clientId, clientSecret, refreshToken, baseUrl, tokenUrl, appName, username } = req.body;
     
     if (!clientId || !clientSecret) {
       return res.status(400).json({
@@ -347,30 +348,66 @@ app.post("/api/oauth/config", (req, res) => {
       clientSecret,
       refreshToken: refreshToken || null,
       baseUrl: baseUrl || "https://partner.hanet.ai",
-      tokenUrl: tokenUrl || "https://oauth.hanet.com/token"
+      tokenUrl: tokenUrl || "https://oauth.hanet.com/token",
+      appName: appName || null,
+      username: username || null,
+      createdAt: new Date()
     };
     
+    // Lưu cấu hình vào MongoDB
+    const configKey = appName || username || 'default';
+    await mongodbStorage.saveOAuthConfig(configKey, config);
+    console.log(`[${new Date().toISOString()}] Đã lưu cấu hình ${configKey} vào MongoDB`);
+    
+    // Cập nhật cấu hình hiện tại
     tokenManager.setDynamicConfig(config);
     
     return res.status(200).json({
       success: true,
-      message: "Cấu hình OAuth đã được cập nhật",
+      message: "Cấu hình OAuth đã được lưu vào MongoDB",
+      configName: configKey
     });
   } catch (error) {
     console.error("Lỗi khi cập nhật cấu hình OAuth:", error);
     return res.status(500).json({
       success: false,
-      message: "Lỗi khi cập nhật cấu hình: " + error.message,
+      message: "Lỗi khi lưu cấu hình: " + error.message,
     });
   }
 });
 
-// API lấy cấu hình hiện tại
-app.get("/api/oauth/config", (req, res) => {
+// API lấy danh sách cấu hình từ MongoDB
+app.get("/api/oauth/configs", async (req, res) => {
   try {
-    const config = tokenManager.getCurrentConfig();
+    const configNames = await mongodbStorage.getConfigNames();
     
-    // Ẩn client secret khi trả về client
+    return res.status(200).json({
+      success: true,
+      data: configNames
+    });
+  } catch (error) {
+    console.error("Lỗi khi lấy danh sách cấu hình:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi khi lấy danh sách cấu hình: " + error.message
+    });
+  }
+});
+
+// API lấy chi tiết cấu hình từ MongoDB
+app.get("/api/oauth/config/:name", async (req, res) => {
+  try {
+    const configName = req.params.name;
+    const config = await mongodbStorage.getOAuthConfig(configName);
+    
+    if (!config) {
+      return res.status(404).json({
+        success: false,
+        message: `Không tìm thấy cấu hình: ${configName}`
+      });
+    }
+    
+    // Ẩn các thông tin nhạy cảm khi trả về client
     const safeConfig = {
       ...config,
       clientSecret: config.clientSecret ? "******" : null,
@@ -379,20 +416,50 @@ app.get("/api/oauth/config", (req, res) => {
     
     return res.status(200).json({
       success: true,
-      data: safeConfig,
+      data: safeConfig
     });
   } catch (error) {
+    console.error(`Lỗi khi lấy cấu hình ${req.params.name}:`, error);
     return res.status(500).json({
       success: false,
-      message: "Lỗi khi lấy cấu hình: " + error.message,
+      message: "Lỗi khi lấy cấu hình: " + error.message
     });
   }
 });
 
-// API xử lý OAuth callback
+// API xóa cấu hình từ MongoDB
+app.delete("/api/oauth/config/:name", async (req, res) => {
+  try {
+    const configName = req.params.name;
+    const { db } = await mongodbStorage.connectToDatabase();
+    const collection = db.collection('oauthConfigs');
+    
+    const result = await collection.deleteOne({ _id: configName });
+    
+    if (result.deletedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `Không tìm thấy cấu hình: ${configName}`
+      });
+    }
+    
+    return res.status(200).json({
+      success: true,
+      message: `Đã xóa cấu hình: ${configName}`
+    });
+  } catch (error) {
+    console.error(`Lỗi khi xóa cấu hình ${req.params.name}:`, error);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi khi xóa cấu hình: " + error.message
+    });
+  }
+});
+
+// API xử lý OAuth callback - cập nhật để lưu vào MongoDB
 app.get("/api/oauth/callback", async (req, res) => {
   try {
-    const { code, redirect_uri } = req.query;
+    const { code, redirect_uri, configName } = req.query;
     
     if (!code) {
       return res.status(400).json({
@@ -408,6 +475,20 @@ app.get("/api/oauth/callback", async (req, res) => {
       hasRefreshToken: !!tokenData.refreshToken,
       expiresIn: tokenData.expiresIn
     });
+
+    // Lưu token vào MongoDB nếu có tên cấu hình
+    if (configName && tokenData.refreshToken) {
+      try {
+        const existingConfig = await mongodbStorage.getOAuthConfig(configName);
+        if (existingConfig) {
+          existingConfig.refreshToken = tokenData.refreshToken;
+          await mongodbStorage.saveOAuthConfig(configName, existingConfig);
+          console.log(`[${new Date().toISOString()}] Đã cập nhật refresh token cho cấu hình ${configName}`);
+        }
+      } catch (storageError) {
+        console.error(`[${new Date().toISOString()}] Lỗi lưu token vào MongoDB:`, storageError);
+      }
+    }
     
     return res.status(200).json({
       success: true,
@@ -507,15 +588,53 @@ app.get("/api/user/info", async (req, res) => {
   }
 });
 
-// Thêm endpoint chuyển đổi tài khoản sử dụng
-app.post("/api/oauth/use-account", (req, res) => {
+// Thêm API chuyển đổi tài khoản sử dụng từ MongoDB
+app.post("/api/oauth/use-account", async (req, res) => {
   const { username } = req.body;
   if (!username) return res.status(400).json({ success: false, message: "Thiếu username" });
   try {
-    tokenManager.useAccount(username);
-    return res.json({ success: true, message: "Đã chuyển cấu hình thành công" });
+    // Lấy cấu hình từ MongoDB
+    const config = await mongodbStorage.getOAuthConfig(username);
+    if (!config) {
+      return res.status(404).json({ 
+        success: false, 
+        message: `Không tìm thấy cấu hình cho tài khoản: ${username}` 
+      });
+    }
+    
+    // Cập nhật cấu hình hiện tại
+    tokenManager.setDynamicConfig(config);
+    
+    return res.json({ 
+      success: true, 
+      message: `Đã chuyển sang sử dụng cấu hình: ${username}` 
+    });
   } catch (e) {
     return res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+// API lấy cấu hình hiện tại (giữ lại cho tương thích ngược với client)
+app.get("/api/oauth/config", (req, res) => {
+  try {
+    const config = tokenManager.getCurrentConfig();
+    
+    // Ẩn client secret khi trả về client
+    const safeConfig = {
+      ...config,
+      clientSecret: config.clientSecret ? "******" : null,
+      refreshToken: config.refreshToken ? "******" : null,
+    };
+    
+    return res.status(200).json({
+      success: true,
+      data: safeConfig,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi khi lấy cấu hình: " + error.message,
+    });
   }
 });
 
