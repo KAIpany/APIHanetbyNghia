@@ -1,26 +1,41 @@
-// tokenStorage.js - Module lưu trữ token cho môi trường Vercel Serverless
-// Phiên bản này lưu trữ token bằng API Fetch cho phép làm việc với Vercel Serverless
+// tokenStorage.js - Module lưu trữ token cho môi trường Serverless
+// Phiên bản cải tiến sử dụng nhiều phương thức lưu trữ
 
 // Sử dụng fetch API để gửi yêu cầu HTTP
 const fetch = require('node-fetch');
+const fs = require('fs');
+const path = require('path');
 
-// URL của API lưu trữ, có thể là một API của bạn hoặc một dịch vụ lưu trữ bên ngoài
-// Đối với môi trường phát triển, mặc định sẽ sử dụng bộ nhớ trong RAM
+// Thư mục lưu trữ token trong /tmp (cho AWS Lambda)
+const TOKEN_DIR = path.join('/tmp', 'oauth-tokens');
+const TOKEN_FILE = path.join(TOKEN_DIR, 'tokens.json');
+
+// Tạo thư mục nếu không tồn tại
+if (!fs.existsSync(TOKEN_DIR)) {
+  try {
+    fs.mkdirSync(TOKEN_DIR, { recursive: true });
+    console.log(`[${new Date().toISOString()}] Đã tạo thư mục lưu trữ token: ${TOKEN_DIR}`);
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Lỗi khi tạo thư mục token:`, error.message);
+  }
+}
+
+// URL của API lưu trữ bên ngoài (ưu tiên sử dụng)
+// Đây có thể là endpoint của API Gateway + DynamoDB, MongoDB Atlas, hoặc dịch vụ lưu trữ khác
+const EXTERNAL_STORAGE_URL = process.env.TOKEN_STORAGE_API_URL || '';
+
+// Bộ nhớ RAM cho môi trường phát triển
 let memoryStorage = {};
 const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
 
-// Tùy chọn sử dụng dịch vụ lưu trữ bên ngoài
-const API_STORAGE_URL = process.env.TOKEN_STORAGE_API_URL || '';
+// Kiểm tra xem có đang chạy trên môi trường serverless không
+const IS_SERVERLESS = process.env.VERCEL === '1' || process.env.AWS_LAMBDA_FUNCTION_NAME || false;
 
-// Kiểm tra xem môi trường có phải là production trên Vercel không
-const isVercelProduction = process.env.VERCEL === '1';
-
-// Tạo khóa bảo mật cho dữ liệu (chỉ là base64 đơn giản)
+// ===== PHƯƠNG THỨC MÃ HÓA DỮ LIỆU =====
 function encodeData(data) {
   return Buffer.from(JSON.stringify(data)).toString('base64');
 }
 
-// Giải mã dữ liệu
 function decodeData(encodedData) {
   try {
     return JSON.parse(Buffer.from(encodedData, 'base64').toString('utf8'));
@@ -30,46 +45,81 @@ function decodeData(encodedData) {
   }
 }
 
-// Lưu token vào kho lưu trữ
+// ===== PHƯƠNG THỨC LƯU TRỮ TẠM /TMP =====
+// Lưu token vào file trong thư mục /tmp
+function saveTokenToTmpFile(tokens) {
+  try {
+    fs.writeFileSync(TOKEN_FILE, JSON.stringify(tokens), 'utf8');
+    console.log(`[${new Date().toISOString()}] Đã lưu token vào file: ${TOKEN_FILE}`);
+    return true;
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Lỗi khi lưu token vào file:`, error.message);
+    return false;
+  }
+}
+
+// Đọc token từ file trong thư mục /tmp
+function loadTokenFromTmpFile() {
+  try {
+    if (fs.existsSync(TOKEN_FILE)) {
+      const data = fs.readFileSync(TOKEN_FILE, 'utf8');
+      console.log(`[${new Date().toISOString()}] Đã đọc token từ file: ${TOKEN_FILE}`);
+      return JSON.parse(data);
+    }
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Lỗi khi đọc token từ file:`, error.message);
+  }
+  return null;
+}
+
+// ===== LƯU TOKEN CHÍNH =====
 async function saveTokens(tokens) {
   try {
-    // Cập nhật môi trường
-    process.env.HANET_REFRESH_TOKEN = tokens.refreshToken || process.env.HANET_REFRESH_TOKEN;
+    // Lưu vào biến môi trường (tạm thời trong phiên hiện tại)
+    if (tokens.refreshToken) {
+      process.env.HANET_REFRESH_TOKEN = tokens.refreshToken;
+    }
     
     // Nếu là môi trường phát triển, lưu vào bộ nhớ
     if (IS_DEVELOPMENT) {
       memoryStorage.tokens = tokens;
-      console.log(`[${new Date().toISOString()}] Đã lưu token vào bộ nhớ`);
-      return true;
+      console.log(`[${new Date().toISOString()}] Đã lưu token vào bộ nhớ RAM`);
     }
     
-    // Nếu là Vercel production và có API lưu trữ
-    if (isVercelProduction && API_STORAGE_URL) {
-      // Gửi yêu cầu API để lưu token
-      const response = await fetch(API_STORAGE_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          action: 'saveTokens',
-          data: encodeData(tokens),
-          key: process.env.TOKEN_STORAGE_API_KEY || 'default-key'
-        })
-      });
-      
-      const result = await response.json();
-      
-      if (result.success) {
-        console.log(`[${new Date().toISOString()}] Đã lưu token qua API thành công`);
-        return true;
-      } else {
-        throw new Error(result.message || 'Lỗi không xác định từ API lưu trữ');
+    // Lưu vào file /tmp cho AWS Lambda
+    if (IS_SERVERLESS) {
+      saveTokenToTmpFile(tokens);
+    }
+    
+    // Nếu có API lưu trữ bên ngoài, ưu tiên sử dụng
+    if (EXTERNAL_STORAGE_URL) {
+      try {
+        const response = await fetch(EXTERNAL_STORAGE_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            action: 'saveTokens',
+            data: encodeData(tokens),
+            key: process.env.TOKEN_STORAGE_API_KEY || 'default-key'
+          })
+        });
+        
+        const result = await response.json();
+        
+        if (result && result.success) {
+          console.log(`[${new Date().toISOString()}] Đã lưu token qua API thành công`);
+          return true;
+        } else {
+          console.warn(`[${new Date().toISOString()}] API lưu trữ không trả về kết quả thành công:`, result?.message || 'Unknown error');
+        }
+      } catch (apiError) {
+        console.error(`[${new Date().toISOString()}] Lỗi khi lưu token qua API:`, apiError.message);
       }
     }
     
-    // Mặc định nếu không có phương thức lưu trữ nào khác
-    console.log(`[${new Date().toISOString()}] Không có phương thức lưu trữ phù hợp, chỉ lưu vào môi trường`);
+    console.log(`[${new Date().toISOString()}] Đã lưu token (có thể không bền vững trong môi trường serverless)`);
     return true;
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Lỗi khi lưu token:`, error.message);
@@ -77,44 +127,57 @@ async function saveTokens(tokens) {
   }
 }
 
-// Đọc token từ kho lưu trữ
+// ===== ĐỌC TOKEN CHÍNH =====
 async function loadTokens() {
   try {
-    // Luôn ưu tiên đọc từ biến môi trường
+    // Tạo đối tượng kết quả ban đầu từ biến môi trường
     const envToken = process.env.HANET_REFRESH_TOKEN;
     let result = envToken ? { refreshToken: envToken } : null;
     
-    // Nếu là môi trường phát triển, đọc từ bộ nhớ
+    // Nếu là môi trường phát triển, đọc từ bộ nhớ RAM
     if (IS_DEVELOPMENT && memoryStorage.tokens) {
-      console.log(`[${new Date().toISOString()}] Đã đọc token từ bộ nhớ`);
+      console.log(`[${new Date().toISOString()}] Đã đọc token từ bộ nhớ RAM`);
       return memoryStorage.tokens;
     }
     
-    // Nếu là Vercel production và có API lưu trữ
-    if (isVercelProduction && API_STORAGE_URL) {
+    // Đọc từ API lưu trữ (ưu tiên cao nhất cho môi trường production)
+    if (EXTERNAL_STORAGE_URL) {
       try {
-        // Gửi yêu cầu API để đọc token
-        const response = await fetch(`${API_STORAGE_URL}?action=loadTokens&key=${process.env.TOKEN_STORAGE_API_KEY || 'default-key'}`);
-        
+        const response = await fetch(`${EXTERNAL_STORAGE_URL}?action=loadTokens&key=${process.env.TOKEN_STORAGE_API_KEY || 'default-key'}`);
         const apiResult = await response.json();
         
         if (apiResult.success && apiResult.data) {
           const storedTokens = decodeData(apiResult.data);
           console.log(`[${new Date().toISOString()}] Đã đọc token từ API thành công`);
-          result = storedTokens;
+          
+          // Cập nhật biến môi trường
+          if (storedTokens.refreshToken) {
+            process.env.HANET_REFRESH_TOKEN = storedTokens.refreshToken;
+          }
+          
+          return storedTokens;
         }
       } catch (apiError) {
-        console.error(`[${new Date().toISOString()}] Không thể đọc token từ API:`, apiError.message);
+        console.warn(`[${new Date().toISOString()}] Không thể đọc token từ API:`, apiError.message);
       }
     }
     
-    // Nếu không tìm thấy token
-    if (!result) {
-      console.log(`[${new Date().toISOString()}] Không tìm thấy token đã lưu trữ, sử dụng từ env`);
-      return { refreshToken: envToken };
+    // Đọc từ file /tmp cho AWS Lambda
+    if (IS_SERVERLESS) {
+      const tmpTokens = loadTokenFromTmpFile();
+      if (tmpTokens && tmpTokens.refreshToken) {
+        console.log(`[${new Date().toISOString()}] Đã đọc token từ file /tmp`);
+        
+        // Cập nhật biến môi trường
+        process.env.HANET_REFRESH_TOKEN = tmpTokens.refreshToken;
+        
+        return tmpTokens;
+      }
     }
     
-    return result;
+    // Nếu không tìm thấy token từ các nguồn khác
+    console.log(`[${new Date().toISOString()}] Không tìm thấy token từ các nguồn lưu trữ, sử dụng giá trị từ env: ${envToken ? 'Có token' : 'Không có token'}`);
+    return { refreshToken: envToken };
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Lỗi khi đọc token:`, error.message);
     // Vẫn trả về token từ env nếu có
@@ -139,8 +202,8 @@ async function saveOAuthConfig(configName, config) {
     }
     
     // Nếu là Vercel production và có API lưu trữ
-    if (isVercelProduction && API_STORAGE_URL) {
-      const response = await fetch(API_STORAGE_URL, {
+    if (process.env.VERCEL === '1' && EXTERNAL_STORAGE_URL) {
+      const response = await fetch(EXTERNAL_STORAGE_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -181,9 +244,9 @@ async function loadOAuthConfig(configName) {
     }
     
     // Nếu là Vercel production và có API lưu trữ
-    if (isVercelProduction && API_STORAGE_URL) {
+    if (process.env.VERCEL === '1' && EXTERNAL_STORAGE_URL) {
       try {
-        const response = await fetch(`${API_STORAGE_URL}?action=loadOAuthConfig&name=${encodeURIComponent(configName)}&key=${process.env.TOKEN_STORAGE_API_KEY || 'default-key'}`);
+        const response = await fetch(`${EXTERNAL_STORAGE_URL}?action=loadOAuthConfig&name=${encodeURIComponent(configName)}&key=${process.env.TOKEN_STORAGE_API_KEY || 'default-key'}`);
         
         const result = await response.json();
         
@@ -228,9 +291,9 @@ async function getStoredConfigNames() {
     }
     
     // Nếu là Vercel production và có API lưu trữ
-    if (isVercelProduction && API_STORAGE_URL) {
+    if (process.env.VERCEL === '1' && EXTERNAL_STORAGE_URL) {
       try {
-        const response = await fetch(`${API_STORAGE_URL}?action=getConfigNames&key=${process.env.TOKEN_STORAGE_API_KEY || 'default-key'}`);
+        const response = await fetch(`${EXTERNAL_STORAGE_URL}?action=getConfigNames&key=${process.env.TOKEN_STORAGE_API_KEY || 'default-key'}`);
         
         const result = await response.json();
         
