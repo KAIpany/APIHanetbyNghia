@@ -1,0 +1,273 @@
+.oauth-config {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 1.5rem;
+  background-color: white;
+  border: 1px solid #e5e5e5;
+  border-radius: 8px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  margin-bottom: 2rem;
+}
+
+.config-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.oauth-config h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #333;
+  margin: 0;
+}
+
+.home-button {
+  display: inline-block;
+  background-color: #3b82f6;
+  color: white;
+  text-decoration: none;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  font-weight: 500;
+  transition: background-color 0.3s;
+}
+
+.home-button:hover {
+  background-color: #2563eb;
+}
+
+.config-form {
+  margin-bottom: 2rem;
+}
+
+.form-group {
+  margin-bottom: 1.25rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-weight: 500;
+  color: #4b5563;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 1rem;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.1);
+}
+
+.form-group small {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.button-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.save-button, 
+.oauth-button {
+  padding: 0.75rem 1rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s, opacity 0.3s;
+}
+
+.save-button {
+  background-color: #4f46e5;
+  color: white;
+}
+
+.save-button:hover {
+  background-color: #4338ca;
+}
+
+.oauth-button {
+  background-color: #10b981;
+  color: white;
+}
+
+.oauth-button:hover {
+  background-color: #059669;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.error-message {
+  background-color: #fee2e2;
+  border: 1px solid #fca5a5;
+  color: #b91c1c;
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+}
+
+.auth-status {
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  margin-bottom: 1.5rem;
+  text-align: center;
+  font-weight: 500;
+}
+
+.auth-status.unconfigured {
+  background-color: #f3f4f6;
+  border: 1px solid #d1d5db;
+  color: #6b7280;
+}
+
+.auth-status.configured {
+  background-color: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1e40af;
+}
+
+.auth-status.authenticated {
+  background-color: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #065f46;
+}
+
+.auth-status.error {
+  background-color: #fee2e2;
+  border: 1px solid #fca5a5;
+  color: #b91c1c;
+}
+
+.auth-status.warning {
+  background-color: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #c2410c;
+}
+
+.oauth-info {
+  background-color: #f9fafb;
+  border: 1px solid #e5e5e5;
+  border-radius: 4px;
+  padding: 1rem;
+}
+
+.oauth-info h3 {
+  font-size: 1.125rem;
+  margin-bottom: 0.75rem;
+  color: #4b5563;
+}
+
+.oauth-info ol {
+  padding-left: 1.5rem;
+  color: #6b7280;
+}
+
+.oauth-info li {
+  margin-bottom: 0.5rem;
+}
+
+.saved-configs {
+  margin-bottom: 1.5rem;
+  background-color: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 1rem;
+}
+
+.saved-configs h3 {
+  font-size: 1.125rem;
+  margin-bottom: 0.75rem;
+  color: #4b5563;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 0.5rem;
+}
+
+.configs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.config-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+  background-color: white;
+  border: 1px solid #e5e7eb;
+  transition: all 0.2s ease;
+}
+
+.config-item.active {
+  border-color: #4f46e5;
+  background-color: #eff6ff;
+}
+
+.config-name {
+  font-weight: 500;
+  color: #374151;
+}
+
+.config-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.load-button, 
+.delete-button {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s, opacity 0.3s;
+}
+
+.load-button {
+  background-color: #3b82f6;
+  color: white;
+}
+
+.load-button:hover {
+  background-color: #2563eb;
+}
+
+.load-button:disabled {
+  background-color: #60a5fa;
+  opacity: 0.7;
+  cursor: default;
+}
+
+.delete-button {
+  background-color: #ef4444;
+  color: white;
+}
+
+.delete-button:hover {
+  background-color: #dc2626;
+}
+
+@media (max-width: 640px) {
+  .button-group {
+    grid-template-columns: 1fr;
+  }
+}

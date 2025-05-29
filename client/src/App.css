@@ -1,0 +1,1005 @@
+/* Hero.css */
+
+/* Container chính */
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+/* Navigation */
+.app-nav {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 1rem;
+  background-color: #fff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  margin-bottom: 2rem;
+}
+
+.config-button {
+  display: inline-block;
+  background-color: #4f46e5;
+  color: white;
+  text-decoration: none;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  font-weight: 500;
+  transition: background-color 0.3s;
+}
+
+.config-button:hover {
+  background-color: #4338ca;
+}
+
+/* Auth message */
+.auth-message {
+  max-width: 600px;
+  margin: 3rem auto;
+  text-align: center;
+  padding: 2rem;
+  background-color: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+}
+
+.auth-message h2 {
+  color: #1e40af;
+  margin-bottom: 1rem;
+  font-size: 1.5rem;
+}
+
+.auth-message p {
+  color: #3b82f6;
+  margin-bottom: 1.5rem;
+  line-height: 1.5;
+}
+
+.auth-button {
+  display: inline-block;
+  background-color: #2563eb;
+  color: white;
+  text-decoration: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 4px;
+  font-weight: 600;
+  transition: background-color 0.3s;
+}
+
+.auth-button:hover {
+  background-color: #1d4ed8;
+}
+
+/* Form styles */
+.query-form {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 1.5rem;
+  background-color: white;
+  border: 1px solid #e5e5e5;
+  border-radius: 8px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+}
+
+.form-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  text-align: center;
+  color: #333;
+  margin-bottom: 1.5rem;
+}
+
+.form-group {
+  margin-bottom: 1.25rem;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-weight: 500;
+  color: #4b5563;
+}
+
+.form-label.required::after {
+  content: " *";
+  color: #dc2626;
+}
+
+.form-label.disabled {
+  opacity: 0.5;
+}
+
+.form-label-sm {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-weight: 500;
+  color: #4b5563;
+  font-size: 0.875rem;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 1rem;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.1);
+}
+
+.select-loading,
+.select-disabled {
+  background-color: #f3f4f6;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+/* Time range section */
+.time-range-container {
+  border: 1px solid #e5e5e5;
+  padding: 1rem;
+  border-radius: 4px;
+  background-color: #f9fafb;
+  margin-bottom: 1.25rem;
+}
+
+.section-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  color: #4b5563;
+}
+
+.time-range-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+@media (min-width: 768px) {
+  .time-range-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* Readonly summary input */
+.summary-input {
+  background-color: #f3f4f6;
+  color: #6b7280;
+  font-style: italic;
+  font-size: 0.875rem;
+  cursor: default;
+}
+
+/* Alert boxes */
+.alert-error,
+.alert-info {
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+}
+
+.alert-error {
+  background-color: #fee2e2;
+  border: 1px solid #fca5a5;
+  color: #b91c1c;
+}
+
+.alert-info {
+  background-color: #dbeafe;
+  border: 1px solid #93c5fd;
+  color: #1e40af;
+}
+
+.alert-label {
+  font-weight: 500;
+}
+
+/* Submit button */
+.submit-btn {
+  width: 100%;
+  background-color: #4f46e5;
+  color: white;
+  font-weight: 600;
+  padding: 0.625rem 1.5rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.submit-btn:hover {
+  background-color: #4338ca;
+}
+
+.submit-btn.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Results section */
+/* Results section */
+.results-container {
+  margin-top: 2.5rem;
+  width: 100%;
+  display: flex; /* Sử dụng flexbox để căn giữa */
+  justify-content: center; /* Căn giữa theo chiều ngang */
+}
+
+.results-content {
+  width: 100%;
+  max-width: 1200px; /* Bạn có thể điều chỉnh độ rộng tối đa này */
+}
+
+.results-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  text-align: center; /* Căn giữa tiêu đề */
+}
+
+.table-container {
+  overflow-x: auto; /* Cho phép cuộn ngang nếu bảng quá rộng */
+}
+
+.results-table {
+  width: 100%; /* Bảng chiếm toàn bộ chiều rộng của container */
+  border-collapse: collapse;
+  margin-top: 1rem;
+  table-layout: fixed; /* Giúp các cột có chiều rộng đều nhau hơn */
+}
+
+.results-table th,
+.results-table td {
+  padding: 0.75rem;
+  text-align: center; /* Căn giữa nội dung trong các ô */
+  border: 1px solid #e5e5e5; /* Thêm viền để dễ nhìn hơn */
+  word-wrap: break-word; /* Tự động ngắt từ nếu quá dài */
+}
+
+.results-table th {
+  background-color: #f5f5f5;
+  font-weight: 600;
+}
+
+.results-table tbody tr:hover {
+  background-color: #f9fafb;
+}
+
+.no-results {
+  text-align: center;
+  margin-top: 1.5rem;
+  color: #6b7280;
+}
+
+/* Working time styling */
+.results-table td:last-child {
+  font-weight: 500;
+  color: #4f46e5;
+}
+
+/* Checkout time styling */
+.results-table td:nth-last-child(2) {
+  color: #059669;
+}
+
+/* Checkin time styling */
+.results-table td:nth-last-child(3) {
+  color: #0369a1;
+}
+
+/* JSON Display */
+.json-container {
+  margin-top: 1.5rem;
+}
+
+.json-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  text-align: center;
+  color: #4b5563;
+}
+
+.json-display {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background-color: #f3f4f6;
+  font-family: monospace;
+  font-size: 0.75rem;
+  color: #1f2937;
+  white-space: pre;
+  overflow: auto;
+  resize: vertical;
+}
+
+.json-display:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.3);
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  margin-right: auto;
+  padding: 8px 16px;
+  color: #333;
+  font-weight: 500;
+  background-color: #f0f9ff;
+  border-radius: 4px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.welcome-text {
+  font-size: 18px;
+  color: #0369a1;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+/* Quản lý tài khoản */
+.account-section {
+  position: relative;
+  margin-right: 10px;
+}
+
+.current-account {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background-color: rgba(255, 255, 255, 0.1);
+  transition: background-color 0.2s;
+}
+
+.current-account:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.account-name {
+  font-weight: 500;
+  margin-right: 5px;
+}
+
+.dropdown-icon {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+/* CSS cho menu tài khoản mới */
+.account-menu {
+  position: absolute;
+  top: 50px;
+  right: 0;
+  width: 300px;
+  background-color: white;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  overflow: hidden;
+}
+
+.account-menu-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid #eee;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.account-menu-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #333;
+}
+
+.account-menu-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.account-item {
+  padding: 12px 16px;
+  border-bottom: 1px solid #f0f0f0;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  position: relative;
+}
+
+.account-item:hover {
+  background-color: #f5f5f5;
+}
+
+.account-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  margin-right: 12px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.account-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.default-avatar {
+  background-color: #007bff;
+  color: white;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.account-info {
+  flex: 1;
+}
+
+.account-name {
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+/* Badge hiển thị tên ứng dụng */
+.app-name-badge {
+  display: inline-block;
+  background-color: #e1f5fe;
+  color: #0277bd;
+  font-size: 11px;
+  font-weight: normal;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 5px;
+  white-space: nowrap;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.account-email {
+  font-size: 12px;
+  color: #666;
+}
+
+.account-delete {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background-color: #f0f0f0;
+  color: #777;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.account-delete:hover {
+  background-color: #ff5252;
+  color: white;
+}
+
+.no-accounts {
+  padding: 16px;
+  text-align: center;
+  color: #666;
+  font-style: italic;
+}
+
+.storage-info {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #aaa;
+  font-style: normal;
+}
+
+/* CSS cho trang Debug */
+.debug-container {
+  padding: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.debug-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 30px;
+  flex-wrap: wrap;
+  gap: 15px;
+}
+
+.debug-header h1 {
+  margin: 0;
+  flex-grow: 1;
+}
+
+.debug-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.back-button, .clear-button, .test-button {
+  display: inline-block;
+  padding: 8px 15px;
+  border-radius: 4px;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.back-button {
+  background-color: #f0f0f0;
+  color: #444;
+}
+
+.clear-button {
+  background-color: #ff5252;
+  color: white;
+  border: none;
+  cursor: pointer;
+}
+
+.clear-button.danger {
+  background-color: #d32f2f;
+}
+
+.test-button {
+  background-color: #2196f3;
+  color: white;
+  border: none;
+  cursor: pointer;
+}
+
+.back-button:hover {
+  background-color: #e0e0e0;
+}
+
+.clear-button:hover {
+  background-color: #ff3d3d;
+}
+
+.clear-button.danger:hover {
+  background-color: #b71c1c;
+}
+
+.test-button:hover {
+  background-color: #1976d2;
+}
+
+.debug-section {
+  margin-bottom: 30px;
+}
+
+.debug-section h2 {
+  margin-bottom: 20px;
+  font-size: 18px;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 10px;
+}
+
+.info-value {
+  background-color: #f9f9f9;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  padding: 15px;
+  overflow-x: auto;
+  font-size: 14px;
+  margin: 0;
+}
+
+.storage-item {
+  background-color: #f9f9f9;
+  border-radius: 6px;
+  padding: 15px;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.item-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #333;
+}
+
+.remove-button {
+  background-color: #ff5252;
+  color: white;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.remove-button:hover {
+  background-color: #ff3d3d;
+}
+
+.storage-item h4 {
+  font-size: 14px;
+  margin: 15px 0 8px;
+  color: #666;
+}
+
+.item-value {
+  background-color: #fff;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  padding: 10px;
+  overflow-x: auto;
+  max-height: 200px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.parse-error {
+  color: #ff5252;
+  font-style: italic;
+}
+
+.no-items {
+  padding: 20px;
+  text-align: center;
+  color: #888;
+  background-color: #f9f9f9;
+  border-radius: 6px;
+  font-style: italic;
+}
+
+/* Nút di chuyển tài khoản */
+.migrate-button {
+  background-color: #8e44ad;
+  color: white;
+  border: none;
+  padding: 8px 15px;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.migrate-button:hover {
+  background-color: #7d3c98;
+}
+
+/* Hiển thị thông tin tài khoản */
+.accounts-summary {
+  margin-bottom: 30px;
+}
+
+.accounts-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.account-column {
+  flex: 1;
+  min-width: 300px;
+  background-color: #f9f9f9;
+  padding: 15px;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.account-column h3 {
+  margin-top: 0;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #eee;
+  font-size: 16px;
+  color: #333;
+}
+
+.accounts-data {
+  background-color: #fff;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  padding: 10px;
+  max-height: 300px;
+  overflow: auto;
+  font-size: 12px;
+}
+
+/* CSS cho trang OAuthCallback */
+.oauth-callback-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  padding: 20px;
+  background-color: #f5f7fa;
+}
+
+.loading-indicator {
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  padding: 30px 40px;
+  text-align: center;
+  max-width: 400px;
+  width: 100%;
+}
+
+.loading-indicator p {
+  color: #333;
+  font-size: 16px;
+  margin-top: 15px;
+}
+
+.loading-indicator::before {
+  content: "";
+  display: block;
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 20px;
+  border-radius: 50%;
+  border: 3px solid #f3f3f3;
+  border-top: 3px solid #007bff;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.error-message {
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  padding: 30px;
+  text-align: center;
+  max-width: 500px;
+  width: 100%;
+}
+
+.error-message h2 {
+  color: #e53935;
+  margin-bottom: 15px;
+}
+
+.error-message p {
+  color: #555;
+  margin-bottom: 20px;
+}
+
+.error-message button {
+  background-color: #007bff;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s;
+}
+
+.error-message button:hover {
+  background-color: #0069d9;
+}
+
+/* CSS cho các nút trong menu tài khoản */
+.refresh-button {
+  background: none;
+  border: none;
+  font-size: 16px;
+  color: #666;
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  padding: 0;
+  transition: background-color 0.2s;
+}
+
+.refresh-button:hover {
+  background-color: #f0f0f0;
+  color: #333;
+}
+
+.account-menu-footer {
+  padding: 10px 16px;
+  border-top: 1px solid #eee;
+  font-size: 12px;
+  color: #888;
+}
+
+.menu-actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+.debug-link {
+  color: #666;
+  text-decoration: none;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.debug-link:hover {
+  text-decoration: underline;
+}
+
+.refresh-data-button {
+  background: none;
+  border: none;
+  font-size: 12px;
+  color: #0066cc;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.refresh-data-button:hover {
+  text-decoration: underline;
+}
+
+.create-account-button {
+  margin-top: 10px;
+  background-color: #0066cc;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.create-account-button:hover {
+  background-color: #004c99;
+}
+
+/* CSS cho phần tạo tài khoản mới */
+/* OAuth Configurations Section */
+.oauth-configs-section {
+  margin-top: 12px;
+  padding: 12px 0;
+  border-top: 1px solid #eee;
+  border-bottom: 1px solid #eee;
+}
+
+.oauth-configs-section .section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #555;
+  margin-bottom: 8px;
+  padding-left: 12px;
+}
+
+.oauth-configs-list {
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.oauth-config-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.oauth-config-item:hover {
+  background-color: #f5f5f5;
+}
+
+.oauth-config-item.active {
+  background-color: #e6f7ff;
+}
+
+.oauth-config-icon {
+  width: 24px;
+  height: 24px;
+  background-color: #4f46e5;
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 10px;
+  font-size: 12px;
+}
+
+.oauth-config-name {
+  flex: 1;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.active-badge {
+  background-color: #52c41a;
+  color: white;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  margin-left: 8px;
+}
+
+.add-account-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #eee;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.add-account-button {
+  display: block;
+  text-align: center;
+  color: #0066cc;
+  text-decoration: none;
+  padding: 6px 10px;
+  font-size: 13px;
+  border-radius: 4px;
+  background-color: #f0f7ff;
+  transition: background-color 0.2s;
+}
+
+.add-account-button:hover {
+  background-color: #d8ebff;
+  text-decoration: none;
+}
+
+.create-manual-account-button {
+  display: block;
+  width: 100%;
+  text-align: center;
+  color: #4a6782;
+  background-color: #f5f5f5;
+  border: none;
+  padding: 6px 10px;
+  font-size: 13px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.create-manual-account-button:hover {
+  background-color: #e5e5e5;
+}
