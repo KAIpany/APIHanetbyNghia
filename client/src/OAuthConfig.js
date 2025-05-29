@@ -22,6 +22,10 @@ const OAuthConfig = () => {
     status: 'loading',
     error: null
   });
+  const [connectionStatus, setConnectionStatus] = useState({
+    mongo: null,
+    checked: false
+  });
 
   // Lấy danh sách cấu hình và cấu hình đang active khi component mount
   useEffect(() => {
@@ -33,12 +37,40 @@ const OAuthConfig = () => {
       error: null
     });
     
+    // Kiểm tra kết nối MongoDB
+    checkMongoDBConnection();
+    
     // Lấy danh sách cấu hình từ API
     fetchConfigsList();
     
     // Cuối cùng mới fetch cấu hình hiện tại từ server
     fetchConfig();
   }, []);
+
+  // Kiểm tra kết nối MongoDB
+  const checkMongoDBConnection = async () => {
+    try {
+      const response = await fetch(`${process.env.REACT_APP_API_URL}/api/oauth/configs`);
+      
+      if (response.ok) {
+        setConnectionStatus({
+          mongo: true,
+          checked: true
+        });
+      } else {
+        setConnectionStatus({
+          mongo: false,
+          checked: true
+        });
+      }
+    } catch (error) {
+      console.error('Lỗi khi kiểm tra kết nối MongoDB:', error);
+      setConnectionStatus({
+        mongo: false,
+        checked: true
+      });
+    }
+  };
   
   // Lấy danh sách cấu hình từ MongoDB thông qua API
   const fetchConfigsList = async () => {
@@ -231,6 +263,67 @@ const OAuthConfig = () => {
     }
   };
   
+  // Gửi yêu cầu kích hoạt cấu hình trên server
+  const activateConfig = async (name) => {
+    if (!name) return;
+    
+    try {
+      setStatus({
+        loading: true,
+        message: `Đang kích hoạt cấu hình '${name}'...`,
+        status: 'loading',
+        error: null
+      });
+      
+      const response = await fetch(`${process.env.REACT_APP_API_URL}/api/oauth/use-account`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ username: name })
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || `Không thể kích hoạt cấu hình '${name}'`);
+      }
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        console.log(`Đã kích hoạt cấu hình '${name}' trên server thành công`);
+        
+        // Cập nhật giao diện
+        setActiveConfig(name);
+        
+        setStatus({
+          loading: false,
+          message: result.message || `Đã kích hoạt cấu hình '${name}'`,
+          status: 'success',
+          error: null
+        });
+        
+        // Kiểm tra lại trạng thái xác thực
+        setTimeout(() => {
+          checkAuthStatus();
+        }, 1000);
+        
+        return true;
+      } else {
+        throw new Error(result.message || `Không thể kích hoạt cấu hình '${name}'`);
+      }
+    } catch (error) {
+      console.error(`Lỗi khi kích hoạt cấu hình '${name}':`, error);
+      
+      setStatus({
+        loading: false,
+        message: `Lỗi khi kích hoạt cấu hình '${name}'`,
+        status: 'error',
+        error: error.message
+      });
+    }
+  };
+  
   // Lưu cấu hình mới vào MongoDB
   const saveConfig = async () => {
     if (!configName.trim()) {
@@ -273,6 +366,11 @@ const OAuthConfig = () => {
         })
       });
 
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Lỗi khi lưu cấu hình');
+      }
+
       const result = await response.json();
       
       if (result.success) {
@@ -280,6 +378,9 @@ const OAuthConfig = () => {
         
         // Đặt làm cấu hình active
         setActiveConfig(configName);
+        
+        // Kích hoạt cấu hình trên server
+        await activateConfig(configName);
         
         // Cập nhật danh sách cấu hình từ MongoDB
         fetchConfigsList();
@@ -379,6 +480,16 @@ const OAuthConfig = () => {
       return;
     }
 
+    if (!configName) {
+      setStatus({
+        ...status,
+        status: 'error',
+        message: 'Vui lòng nhập tên cấu hình trước khi đăng nhập',
+        error: 'Thiếu tên cấu hình'
+      });
+      return;
+    }
+
     // Tạo URL redirect
     const redirectUri = `${window.location.origin}/oauth-callback`;
     
@@ -392,30 +503,23 @@ const OAuthConfig = () => {
     // Cập nhật state
     setConfig(updatedConfig);
     
-    // Nếu đang có cấu hình active, lưu vào MongoDB
-    if (configName) {
-      // Lưu cấu hình vào MongoDB
-      const configToSave = {
-        ...updatedConfig,
-        username: configName
-      };
+    // Lưu cấu hình vào MongoDB trước khi đăng nhập
+    saveConfig().then(() => {
+      // URL xác thực Hanet OAuth2
+      const authUrl = `https://oauth.hanet.com/oauth2/authorize?response_type=code&client_id=${config.clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=full&state=${encodeURIComponent(configName)}`;
       
-      fetch(`${process.env.REACT_APP_API_URL}/api/oauth/config`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(configToSave)
-      }).catch(error => {
-        console.error('Lỗi khi lưu cấu hình trước khi đăng nhập:', error);
+      // Mở cửa sổ đăng nhập mới
+      window.open(authUrl, 'hanetOAuth', 'width=600,height=700');
+    }).catch(error => {
+      console.error('Lỗi khi lưu cấu hình trước khi đăng nhập:', error);
+      
+      setStatus({
+        loading: false,
+        message: 'Lỗi: Không thể lưu cấu hình trước khi đăng nhập',
+        status: 'error',
+        error: error.message
       });
-    }
-    
-    // URL xác thực Hanet OAuth2
-    const authUrl = `https://oauth.hanet.com/oauth2/authorize?response_type=code&client_id=${config.clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=full`;
-    
-    // Mở cửa sổ đăng nhập mới
-    window.open(authUrl, 'hanetOAuth', 'width=600,height=700');
+    });
   };
 
   const handleChange = (e) => {
@@ -434,6 +538,20 @@ const OAuthConfig = () => {
         </Link>
       </div>
       
+      {connectionStatus.checked && (
+        <div className={`connection-status ${connectionStatus.mongo ? 'success' : 'error'}`}>
+          <p>Kết nối MongoDB: {connectionStatus.mongo ? 'Đang hoạt động' : 'Không thể kết nối'}</p>
+          {!connectionStatus.mongo && (
+            <p className="connection-error">
+              Không thể kết nối tới MongoDB. Vui lòng kiểm tra biến môi trường MONGODB_URI và MONGODB_DB_NAME đã được thiết lập đúng chưa.
+            </p>
+          )}
+          <button onClick={checkMongoDBConnection} className="check-connection">
+            Kiểm tra lại kết nối
+          </button>
+        </div>
+      )}
+      
       {status.error && (
         <div className="error-message">
           <p>{status.error}</p>
@@ -443,6 +561,17 @@ const OAuthConfig = () => {
       {status.authStatus && (
         <div className={`auth-status ${status.authStatus}`}>
           <p>Trạng thái xác thực: {status.authMessage}</p>
+          {status.authStatus === 'error' && status.authMessage.includes('400') && (
+            <div className="error-details">
+              <p>Lỗi 400 có thể do:</p>
+              <ul>
+                <li>Client ID hoặc Client Secret không đúng</li>
+                <li>Refresh token đã hết hạn hoặc bị thu hồi</li>
+                <li>Dữ liệu trong MongoDB không khớp với cấu hình API</li>
+              </ul>
+              <p>Hãy thử tạo cấu hình mới và đăng nhập lại.</p>
+            </div>
+          )}
         </div>
       )}
       
@@ -458,9 +587,15 @@ const OAuthConfig = () => {
                   <button 
                     onClick={() => loadConfigByName(name)}
                     className="load-button"
+                  >
+                    Xem
+                  </button>
+                  <button 
+                    onClick={() => activateConfig(name)}
+                    className="activate-button"
                     disabled={activeConfig === name}
                   >
-                    {activeConfig === name ? 'Đang dùng' : 'Chuyển đổi'}
+                    {activeConfig === name ? 'Đang dùng' : 'Kích hoạt'}
                   </button>
                   <button 
                     onClick={() => deleteConfig(name)}
@@ -576,7 +711,7 @@ const OAuthConfig = () => {
           <button 
             className="oauth-button"
             onClick={initiateOAuth}
-            disabled={!config.clientId || status.loading}
+            disabled={!config.clientId || status.loading || !configName.trim()}
           >
             Đăng nhập với Hanet
           </button>
@@ -586,11 +721,19 @@ const OAuthConfig = () => {
       <div className="oauth-info">
         <h3>Hướng dẫn</h3>
         <ol>
+          <li>Nhập <strong>Tên cấu hình</strong> để định danh cấu hình này</li>
           <li>Nhập <strong>Client ID</strong> và <strong>Client Secret</strong> từ tài khoản Hanet của bạn</li>
-          <li>Nhấn <strong>Lưu cấu hình</strong> để lưu thông tin</li>
+          <li>Nhấn <strong>Lưu cấu hình</strong> để lưu thông tin vào MongoDB</li>
           <li>Nhấn <strong>Đăng nhập với Hanet</strong> để xác thực</li>
           <li>Sau khi xác thực, hệ thống sẽ tự động lưu trữ token</li>
         </ol>
+        
+        <h3>Xử lý sự cố</h3>
+        <ul>
+          <li>Nếu không thể kết nối MongoDB, kiểm tra biến môi trường <code>MONGODB_URI</code> và <code>MONGODB_DB_NAME</code></li>
+          <li>Khi gặp lỗi 400, tạo cấu hình mới và xác thực lại với Hanet</li>
+          <li>Đảm bảo Client ID và Client Secret chính xác</li>
+        </ul>
       </div>
     </div>
   );
