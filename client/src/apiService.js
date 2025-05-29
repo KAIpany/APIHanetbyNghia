@@ -3,7 +3,8 @@ const API_URL = process.env.REACT_APP_API_URL;
 
 // Theo dõi thời gian kiểm tra xác thực cuối cùng
 let lastAuthCheckTime = 0;
-const AUTH_CHECK_INTERVAL = 5 * 60 * 1000; // 5 phút
+const AUTH_CHECK_INTERVAL = 2 * 60 * 1000; // 2 phút
+const TOKEN_REFRESH_THRESHOLD = 13 * 60 * 1000; // Làm mới token trước khi hết hạn 2 phút
 
 // Theo dõi nếu đang trong quá trình làm mới xác thực
 let isRefreshingAuth = false;
@@ -28,9 +29,10 @@ const checkAuthStatus = async (forceCheck = false) => {
     if (result.success && result.data) {
       console.log(`[apiService] Trạng thái xác thực: ${result.data.status}`);
       
-      // Nếu chưa xác thực, thử tự động làm mới xác thực
-      if (result.data.status !== 'authenticated') {
-        console.log('[apiService] Không có xác thực hợp lệ, thử làm mới');
+      // Nếu token sắp hết hạn hoặc chưa xác thực, thử làm mới
+      if (result.data.status !== 'authenticated' || 
+          (result.data.tokenExpiresIn && result.data.tokenExpiresIn < TOKEN_REFRESH_THRESHOLD)) {
+        console.log('[apiService] Token sắp hết hạn hoặc không hợp lệ, thử làm mới');
         await refreshAuthentication();
       }
       
