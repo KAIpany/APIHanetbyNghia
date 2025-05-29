@@ -5,10 +5,19 @@ const qs = require("qs");
 const tokenStorage = require("./tokenStorage");
 const localConfigStore = require('./localConfigStore');
 
+// TOKEN MẶC ĐỊNH CHO MÔI TRƯỜNG SERVERLESS
+// ⚠️ CHÚ Ý: Đây không phải là phương pháp bảo mật tốt nhất
+// Chỉ sử dụng cho mục đích phát triển hoặc trong trường hợp đặc biệt
+const DEFAULT_TOKENS = {
+  refreshToken: "YOUR_REFRESH_TOKEN_HERE", // Thay thế bằng refresh token của bạn
+  clientId: "YOUR_CLIENT_ID_HERE", // Thay thế bằng client ID của bạn
+  clientSecret: "YOUR_CLIENT_SECRET_HERE" // Thay thế bằng client secret của bạn
+};
+
 // Lưu trữ thông tin token hiện tại
 let cachedTokenData = {
   accessToken: null,
-  refreshToken: null,
+  refreshToken: DEFAULT_TOKENS.refreshToken || null,
   expiresAt: null,
   lastSync: Date.now() // Timestamp cho lần đồng bộ cuối
 };
@@ -16,12 +25,25 @@ let cachedTokenData = {
 let currentUsername = null; // Tài khoản đang sử dụng
 
 // Lưu trữ cấu hình động từ client
-let dynamicConfig = null;
+let dynamicConfig = {
+  clientId: DEFAULT_TOKENS.clientId,
+  clientSecret: DEFAULT_TOKENS.clientSecret,
+  refreshToken: DEFAULT_TOKENS.refreshToken,
+  baseUrl: "https://partner.hanet.ai",
+  tokenUrl: "https://oauth.hanet.com/token"
+};
 
 // Khai báo hàm initializeTokens trước khi sử dụng
 // Khởi tạo và tải token từ storage
 const initializeTokens = async () => {
   try {
+    // Đảm bảo token mặc định luôn được set nếu không có token nào khác
+    if (DEFAULT_TOKENS.refreshToken) {
+      process.env.HANET_REFRESH_TOKEN = process.env.HANET_REFRESH_TOKEN || DEFAULT_TOKENS.refreshToken;
+      process.env.HANET_CLIENT_ID = process.env.HANET_CLIENT_ID || DEFAULT_TOKENS.clientId;
+      process.env.HANET_CLIENT_SECRET = process.env.HANET_CLIENT_SECRET || DEFAULT_TOKENS.clientSecret;
+    }
+    
     // Luôn đọc từ tokenStorage trước
     const storedTokens = await tokenStorage.loadTokens();
     
@@ -72,9 +94,30 @@ const initializeTokens = async () => {
       return;
     }
     
+    // Nếu vẫn không có token nào, sử dụng token mặc định
+    if (DEFAULT_TOKENS.refreshToken) {
+      console.log(`[${new Date().toISOString()}] Sử dụng refresh token mặc định từ code`);
+      cachedTokenData.refreshToken = DEFAULT_TOKENS.refreshToken;
+      cachedTokenData.lastSync = Date.now();
+      
+      // Cập nhật vào storage
+      await tokenStorage.saveTokens({
+        refreshToken: DEFAULT_TOKENS.refreshToken,
+        lastSync: cachedTokenData.lastSync
+      });
+      
+      return;
+    }
+    
     console.log(`[${new Date().toISOString()}] Không tìm thấy refresh token`);
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Lỗi khi khởi tạo token:`, error.message);
+    
+    // Cuối cùng, nếu có lỗi và có token mặc định, sử dụng nó
+    if (DEFAULT_TOKENS.refreshToken) {
+      cachedTokenData.refreshToken = DEFAULT_TOKENS.refreshToken;
+      console.log(`[${new Date().toISOString()}] Sử dụng refresh token mặc định sau lỗi`);
+    }
   }
 };
 

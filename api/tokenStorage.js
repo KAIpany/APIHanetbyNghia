@@ -1,12 +1,15 @@
 // tokenStorage.js - Module lưu trữ token cho môi trường Serverless
-// Phiên bản cải tiến sử dụng nhiều phương thức lưu trữ
+// Phiên bản cải tiến sử dụng MongoDB làm phương thức lưu trữ chính
 
-// Sử dụng fetch API để gửi yêu cầu HTTP
+// Sử dụng fetch API để gửi yêu cầu HTTP (dành cho các API lưu trữ khác nếu cần)
 const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
 
-// Thư mục lưu trữ token trong /tmp (cho AWS Lambda)
+// Import module MongoDB storage
+const mongoDb = require('./mongodbStorage');
+
+// Thư mục lưu trữ token dự phòng trong /tmp (cho AWS Lambda)
 const TOKEN_DIR = path.join('/tmp', 'oauth-tokens');
 const TOKEN_FILE = path.join(TOKEN_DIR, 'tokens.json');
 
@@ -14,14 +17,13 @@ const TOKEN_FILE = path.join(TOKEN_DIR, 'tokens.json');
 if (!fs.existsSync(TOKEN_DIR)) {
   try {
     fs.mkdirSync(TOKEN_DIR, { recursive: true });
-    console.log(`[${new Date().toISOString()}] Đã tạo thư mục lưu trữ token: ${TOKEN_DIR}`);
+    console.log(`[${new Date().toISOString()}] Đã tạo thư mục lưu trữ token dự phòng: ${TOKEN_DIR}`);
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Lỗi khi tạo thư mục token:`, error.message);
   }
 }
 
-// URL của API lưu trữ bên ngoài (ưu tiên sử dụng)
-// Đây có thể là endpoint của API Gateway + DynamoDB, MongoDB Atlas, hoặc dịch vụ lưu trữ khác
+// URL của API lưu trữ bên ngoài (đã thay thế bằng MongoDB)
 const EXTERNAL_STORAGE_URL = process.env.TOKEN_STORAGE_API_URL || '';
 
 // Bộ nhớ RAM cho môi trường phát triển
@@ -30,6 +32,19 @@ const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
 
 // Kiểm tra xem có đang chạy trên môi trường serverless không
 const IS_SERVERLESS = process.env.VERCEL === '1' || process.env.AWS_LAMBDA_FUNCTION_NAME || false;
+
+// Kiểm tra xem MongoDB có khả dụng không
+let isMongoDB = true;
+try {
+  // Kiểm tra nhanh MongoDB bằng cách thử kết nối
+  mongoDb.connectToDatabase().catch(() => {
+    isMongoDB = false;
+    console.warn(`[${new Date().toISOString()}] MongoDB không khả dụng, sẽ sử dụng các phương thức lưu trữ khác`);
+  });
+} catch (error) {
+  isMongoDB = false;
+  console.warn(`[${new Date().toISOString()}] Lỗi khi kiểm tra MongoDB:`, error.message);
+}
 
 // ===== PHƯƠNG THỨC MÃ HÓA DỮ LIỆU =====
 function encodeData(data) {
@@ -50,7 +65,7 @@ function decodeData(encodedData) {
 function saveTokenToTmpFile(tokens) {
   try {
     fs.writeFileSync(TOKEN_FILE, JSON.stringify(tokens), 'utf8');
-    console.log(`[${new Date().toISOString()}] Đã lưu token vào file: ${TOKEN_FILE}`);
+    console.log(`[${new Date().toISOString()}] Đã lưu token vào file dự phòng: ${TOKEN_FILE}`);
     return true;
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Lỗi khi lưu token vào file:`, error.message);
@@ -63,7 +78,7 @@ function loadTokenFromTmpFile() {
   try {
     if (fs.existsSync(TOKEN_FILE)) {
       const data = fs.readFileSync(TOKEN_FILE, 'utf8');
-      console.log(`[${new Date().toISOString()}] Đã đọc token từ file: ${TOKEN_FILE}`);
+      console.log(`[${new Date().toISOString()}] Đã đọc token từ file dự phòng: ${TOKEN_FILE}`);
       return JSON.parse(data);
     }
   } catch (error) {
@@ -86,13 +101,30 @@ async function saveTokens(tokens) {
       console.log(`[${new Date().toISOString()}] Đã lưu token vào bộ nhớ RAM`);
     }
     
-    // Lưu vào file /tmp cho AWS Lambda
+    // Lưu vào MongoDB (ưu tiên cao nhất)
+    if (isMongoDB) {
+      try {
+        const saved = await mongoDb.saveToken('default', tokens);
+        if (saved) {
+          console.log(`[${new Date().toISOString()}] Đã lưu token vào MongoDB thành công`);
+          // Vẫn lưu bản sao tạm thời vào file nếu đang chạy trong môi trường serverless
+          if (IS_SERVERLESS) {
+            saveTokenToTmpFile(tokens);
+          }
+          return true;
+        }
+      } catch (mongoError) {
+        console.error(`[${new Date().toISOString()}] Lỗi khi lưu token vào MongoDB:`, mongoError.message);
+      }
+    }
+    
+    // Lưu vào file /tmp cho AWS Lambda (nếu MongoDB thất bại)
     if (IS_SERVERLESS) {
       saveTokenToTmpFile(tokens);
     }
     
-    // Nếu có API lưu trữ bên ngoài, ưu tiên sử dụng
-    if (EXTERNAL_STORAGE_URL) {
+    // Nếu có API lưu trữ bên ngoài và MongoDB không khả dụng
+    if (EXTERNAL_STORAGE_URL && !isMongoDB) {
       try {
         const response = await fetch(EXTERNAL_STORAGE_URL, {
           method: 'POST',
@@ -119,7 +151,7 @@ async function saveTokens(tokens) {
       }
     }
     
-    console.log(`[${new Date().toISOString()}] Đã lưu token (có thể không bền vững trong môi trường serverless)`);
+    console.log(`[${new Date().toISOString()}] Đã lưu token (có thể không bền vững nếu không có MongoDB)`);
     return true;
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Lỗi khi lưu token:`, error.message);
@@ -140,8 +172,27 @@ async function loadTokens() {
       return memoryStorage.tokens;
     }
     
-    // Đọc từ API lưu trữ (ưu tiên cao nhất cho môi trường production)
-    if (EXTERNAL_STORAGE_URL) {
+    // Đọc từ MongoDB (ưu tiên cao nhất)
+    if (isMongoDB) {
+      try {
+        const tokenData = await mongoDb.getToken('default');
+        if (tokenData && tokenData.refreshToken) {
+          console.log(`[${new Date().toISOString()}] Đã đọc token từ MongoDB thành công`);
+          
+          // Cập nhật biến môi trường
+          if (tokenData.refreshToken) {
+            process.env.HANET_REFRESH_TOKEN = tokenData.refreshToken;
+          }
+          
+          return tokenData;
+        }
+      } catch (mongoError) {
+        console.error(`[${new Date().toISOString()}] Lỗi khi đọc token từ MongoDB:`, mongoError.message);
+      }
+    }
+    
+    // Đọc từ API lưu trữ nếu MongoDB không khả dụng
+    if (EXTERNAL_STORAGE_URL && !isMongoDB) {
       try {
         const response = await fetch(`${EXTERNAL_STORAGE_URL}?action=loadTokens&key=${process.env.TOKEN_STORAGE_API_KEY || 'default-key'}`);
         const apiResult = await response.json();
@@ -171,6 +222,16 @@ async function loadTokens() {
         // Cập nhật biến môi trường
         process.env.HANET_REFRESH_TOKEN = tmpTokens.refreshToken;
         
+        // Đồng bộ lại vào MongoDB nếu có thể
+        if (isMongoDB) {
+          try {
+            await mongoDb.saveToken('default', tmpTokens);
+            console.log(`[${new Date().toISOString()}] Đã đồng bộ token từ file /tmp vào MongoDB`);
+          } catch (syncError) {
+            console.error(`[${new Date().toISOString()}] Lỗi khi đồng bộ token từ file /tmp vào MongoDB:`, syncError.message);
+          }
+        }
+        
         return tmpTokens;
       }
     }
@@ -198,35 +259,51 @@ async function saveOAuthConfig(configName, config) {
       if (!memoryStorage.configs) memoryStorage.configs = {};
       memoryStorage.configs[configName] = config;
       console.log(`[${new Date().toISOString()}] Đã lưu cấu hình OAuth '${configName}' vào bộ nhớ`);
-      return true;
     }
     
-    // Nếu là Vercel production và có API lưu trữ
-    if (process.env.VERCEL === '1' && EXTERNAL_STORAGE_URL) {
-      const response = await fetch(EXTERNAL_STORAGE_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          action: 'saveOAuthConfig',
-          name: configName,
-          data: encodeData(config),
-          key: process.env.TOKEN_STORAGE_API_KEY || 'default-key'
-        })
-      });
-      
-      const result = await response.json();
-      
-      if (result.success) {
-        console.log(`[${new Date().toISOString()}] Đã lưu cấu hình OAuth '${configName}' qua API thành công`);
-        return true;
-      } else {
-        throw new Error(result.message || 'Lỗi không xác định từ API lưu trữ');
+    // Lưu vào MongoDB (ưu tiên cao nhất)
+    if (isMongoDB) {
+      try {
+        const saved = await mongoDb.saveOAuthConfig(configName, config);
+        if (saved) {
+          console.log(`[${new Date().toISOString()}] Đã lưu cấu hình OAuth '${configName}' vào MongoDB thành công`);
+          return true;
+        }
+      } catch (mongoError) {
+        console.error(`[${new Date().toISOString()}] Lỗi khi lưu cấu hình OAuth vào MongoDB:`, mongoError.message);
       }
     }
     
-    console.log(`[${new Date().toISOString()}] Không có phương thức lưu trữ phù hợp cho cấu hình OAuth`);
+    // Nếu là Vercel production và có API lưu trữ
+    if (process.env.VERCEL === '1' && EXTERNAL_STORAGE_URL && !isMongoDB) {
+      try {
+        const response = await fetch(EXTERNAL_STORAGE_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            action: 'saveOAuthConfig',
+            name: configName,
+            data: encodeData(config),
+            key: process.env.TOKEN_STORAGE_API_KEY || 'default-key'
+          })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          console.log(`[${new Date().toISOString()}] Đã lưu cấu hình OAuth '${configName}' qua API thành công`);
+          return true;
+        } else {
+          console.warn(`[${new Date().toISOString()}] Lỗi khi lưu cấu hình OAuth qua API:`, result.message || 'Lỗi không xác định');
+        }
+      } catch (apiError) {
+        console.error(`[${new Date().toISOString()}] Lỗi khi gửi yêu cầu lưu cấu hình OAuth qua API:`, apiError.message);
+      }
+    }
+    
+    console.log(`[${new Date().toISOString()}] Đã lưu cấu hình OAuth '${configName}'`);
     return true;
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Lỗi khi lưu cấu hình OAuth:`, error.message);
@@ -243,8 +320,21 @@ async function loadOAuthConfig(configName) {
       return memoryStorage.configs[configName];
     }
     
+    // Đọc từ MongoDB (ưu tiên cao nhất)
+    if (isMongoDB) {
+      try {
+        const config = await mongoDb.getOAuthConfig(configName);
+        if (config) {
+          console.log(`[${new Date().toISOString()}] Đã đọc cấu hình OAuth '${configName}' từ MongoDB thành công`);
+          return config;
+        }
+      } catch (mongoError) {
+        console.error(`[${new Date().toISOString()}] Lỗi khi đọc cấu hình OAuth từ MongoDB:`, mongoError.message);
+      }
+    }
+    
     // Nếu là Vercel production và có API lưu trữ
-    if (process.env.VERCEL === '1' && EXTERNAL_STORAGE_URL) {
+    if (process.env.VERCEL === '1' && EXTERNAL_STORAGE_URL && !isMongoDB) {
       try {
         const response = await fetch(`${EXTERNAL_STORAGE_URL}?action=loadOAuthConfig&name=${encodeURIComponent(configName)}&key=${process.env.TOKEN_STORAGE_API_KEY || 'default-key'}`);
         
@@ -290,8 +380,19 @@ async function getStoredConfigNames() {
       return Object.keys(memoryStorage.configs);
     }
     
+    // Lấy từ MongoDB (ưu tiên cao nhất)
+    if (isMongoDB) {
+      try {
+        const configNames = await mongoDb.getConfigNames();
+        console.log(`[${new Date().toISOString()}] Đã lấy danh sách cấu hình từ MongoDB thành công`);
+        return configNames;
+      } catch (mongoError) {
+        console.error(`[${new Date().toISOString()}] Lỗi khi lấy danh sách cấu hình từ MongoDB:`, mongoError.message);
+      }
+    }
+    
     // Nếu là Vercel production và có API lưu trữ
-    if (process.env.VERCEL === '1' && EXTERNAL_STORAGE_URL) {
+    if (process.env.VERCEL === '1' && EXTERNAL_STORAGE_URL && !isMongoDB) {
       try {
         const response = await fetch(`${EXTERNAL_STORAGE_URL}?action=getConfigNames&key=${process.env.TOKEN_STORAGE_API_KEY || 'default-key'}`);
         
@@ -317,9 +418,6 @@ async function getStoredConfigNames() {
     return [];
   }
 }
-
-// Cần cài đặt node-fetch nếu chưa có:
-// npm install node-fetch@2
 
 module.exports = {
   saveTokens,
