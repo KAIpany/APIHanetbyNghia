@@ -2,12 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import './OAuthConfig.css';
 
-// Giữ lại các khóa cho tương thích ngược
-const CONFIGS_LIST_KEY = 'hanet_oauth_configs_list';
-const ACTIVE_CONFIG_KEY = 'hanet_oauth_active_config';
-const CONFIG_PREFIX = 'hanet_oauth_config_';
-const STORAGE_KEY = 'hanet_oauth_config';
-
 const OAuthConfig = () => {
   const [config, setConfig] = useState({
     clientId: '',
@@ -56,99 +50,36 @@ const OAuthConfig = () => {
         setSavedConfigs(result.data);
         console.log('Đã tải danh sách cấu hình từ MongoDB:', result.data);
         
-        // Nếu có cấu hình, tải cấu hình active từ localStorage (để tương thích ngược)
+        // Nếu có cấu hình, tải cấu hình đầu tiên
         if (result.data.length > 0) {
-          const currentActive = localStorage.getItem(ACTIVE_CONFIG_KEY);
-          
-          // Nếu cấu hình active nằm trong danh sách
-          if (currentActive && result.data.includes(currentActive)) {
-            console.log(`Đang tải cấu hình active: ${currentActive}`);
-            loadConfigByName(currentActive);
-          }
-          // Nếu không thì tải cấu hình đầu tiên trong danh sách
-          else if (result.data.length > 0) {
-            console.log(`Không tìm thấy cấu hình active, tải cấu hình đầu tiên: ${result.data[0]}`);
-            loadConfigByName(result.data[0]);
-          }
+          loadConfigByName(result.data[0]);
         } else {
-          // Nếu không có cấu hình nào, kiểm tra xem có lưu trong localStorage không
-          checkLocalStorage();
+          // Không có cấu hình nào, kết thúc trạng thái loading
+          setStatus({
+            loading: false,
+            message: 'Không có cấu hình nào được lưu trữ',
+            status: 'warning',
+            error: null
+          });
         }
       } else {
-        // Nếu không lấy được từ MongoDB, kiểm tra localStorage
-        checkLocalStorage();
+        // Không có cấu hình nào, kết thúc trạng thái loading
+        setStatus({
+          loading: false,
+          message: 'Không thể tải danh sách cấu hình',
+          status: 'error',
+          error: result.message || 'Lỗi không xác định'
+        });
       }
     } catch (error) {
       console.error('Lỗi khi lấy danh sách cấu hình từ MongoDB:', error);
-      // Nếu lỗi, thử lấy từ localStorage
-      checkLocalStorage();
-    }
-  };
-  
-  // Kiểm tra và tải cấu hình từ localStorage (cho tương thích ngược)
-  const checkLocalStorage = () => {
-    // Lấy danh sách cấu hình từ localStorage
-    const configsList = localStorage.getItem(CONFIGS_LIST_KEY);
-    let configNames = [];
-    
-    if (configsList) {
-      try {
-        configNames = JSON.parse(configsList);
-        setSavedConfigs(configNames);
-        console.log('Đã tải danh sách cấu hình từ localStorage:', configNames);
-        
-        // Lấy tên cấu hình đang active
-        const currentActive = localStorage.getItem(ACTIVE_CONFIG_KEY);
-        
-        // Nếu có cấu hình active và nó nằm trong danh sách
-        if (currentActive && configNames.includes(currentActive)) {
-          console.log(`Đang tải cấu hình active từ localStorage: ${currentActive}`);
-          loadConfigFromLocalStorage(currentActive);
-        } else {
-          // Kiểm tra xem có cấu hình legacy không
-          const legacyConfig = localStorage.getItem(STORAGE_KEY);
-          if (legacyConfig) {
-            try {
-              const parsedConfig = JSON.parse(legacyConfig);
-              console.log('Đã tải cấu hình legacy từ localStorage:', parsedConfig);
-              
-              // Cập nhật cấu hình vào state
-              setConfig({
-                clientId: parsedConfig.clientId || '',
-                clientSecret: parsedConfig.clientSecret || '',
-                refreshToken: parsedConfig.refreshToken || '',
-                baseUrl: parsedConfig.baseUrl || 'https://partner.hanet.ai',
-                tokenUrl: parsedConfig.tokenUrl || 'https://oauth.hanet.com/token',
-                appName: parsedConfig.appName || '',
-                redirectUri: parsedConfig.redirectUri || '',
-                userInfoUrl: parsedConfig.userInfoUrl || ''
-              });
-              
-              // Nếu có appName, lưu cấu hình này với tên đó
-              if (parsedConfig.appName) {
-                setConfigName(parsedConfig.appName);
-              }
-              
-              // Đồng bộ lên MongoDB
-              syncToMongoDB(parsedConfig, parsedConfig.appName || 'default');
-            } catch (error) {
-              console.error('Lỗi khi đọc cấu hình legacy từ localStorage:', error);
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Lỗi khi đọc danh sách cấu hình từ localStorage:', error);
-      }
-    }
-    
-    // Cuối cùng kiểm tra trạng thái xác thực và cập nhật status
-    checkAuthStatus().finally(() => {
-      setStatus(prevStatus => ({
-        ...prevStatus,
+      setStatus({
         loading: false,
-        status: 'loaded'
-      }));
-    });
+        message: 'Lỗi kết nối đến server',
+        status: 'error',
+        error: error.message
+      });
+    }
   };
 
   // Lấy cấu hình hiện tại từ server
@@ -187,86 +118,6 @@ const OAuthConfig = () => {
       }
     } catch (error) {
       console.error('Lỗi khi tải cấu hình từ server:', error);
-      // Không thay đổi trạng thái vì chúng ta đã có các cơ chế khác để tải cấu hình
-    }
-  };
-
-  // Đồng bộ cấu hình từ localStorage lên MongoDB
-  const syncToMongoDB = async (configData, name) => {
-    try {
-      console.log(`Đang đồng bộ cấu hình '${name}' lên MongoDB`);
-      
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/api/oauth/config`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          ...configData,
-          appName: name
-        })
-      });
-      
-      const result = await response.json();
-      
-      if (result.success) {
-        console.log(`Đã đồng bộ cấu hình '${name}' lên MongoDB thành công`);
-        return true;
-      } else {
-        console.error(`Lỗi khi đồng bộ cấu hình '${name}' lên MongoDB:`, result.message);
-        return false;
-      }
-    } catch (error) {
-      console.error(`Lỗi khi đồng bộ cấu hình '${name}' lên MongoDB:`, error);
-      return false;
-    }
-  };
-  
-  // Load cấu hình từ localStorage (cho tương thích ngược)
-  const loadConfigFromLocalStorage = (name) => {
-    try {
-      const savedConfig = localStorage.getItem(CONFIG_PREFIX + name);
-      if (savedConfig) {
-        const parsedConfig = JSON.parse(savedConfig);
-        console.log(`Đã tải cấu hình '${name}' từ localStorage:`, parsedConfig);
-        
-        // Cập nhật state
-        setConfig({
-          clientId: parsedConfig.clientId || '',
-          clientSecret: parsedConfig.clientSecret || '',
-          refreshToken: parsedConfig.refreshToken || '',
-          baseUrl: parsedConfig.baseUrl || 'https://partner.hanet.ai',
-          tokenUrl: parsedConfig.tokenUrl || 'https://oauth.hanet.com/token',
-          appName: parsedConfig.appName || '',
-          redirectUri: parsedConfig.redirectUri || '',
-          userInfoUrl: parsedConfig.userInfoUrl || ''
-        });
-        
-        setConfigName(name);
-        setActiveConfig(name);
-        
-        // Đồng bộ lên MongoDB
-        syncToMongoDB(parsedConfig, name);
-        
-        // Cập nhật thông báo
-        setStatus({
-          loading: false,
-          message: `Đã tải cấu hình '${name}' từ localStorage`,
-          status: 'success',
-          error: null
-        });
-        
-        // Cập nhật trạng thái xác thực
-        checkAuthStatus();
-        
-        return true;
-      } else {
-        console.log(`Không tìm thấy cấu hình '${name}' trong localStorage`);
-        return false;
-      }
-    } catch (error) {
-      console.error(`Lỗi khi tải cấu hình '${name}' từ localStorage:`, error);
-      return false;
     }
   };
 
@@ -338,7 +189,6 @@ const OAuthConfig = () => {
         
         // Set activeConfig để hiển thị đang active
         setActiveConfig(name);
-        localStorage.setItem(ACTIVE_CONFIG_KEY, name);
         
         // Cập nhật cấu hình vào state
         setConfig({
@@ -367,25 +217,17 @@ const OAuthConfig = () => {
         
         return true;
       } else {
-        // Thử lấy từ localStorage nếu không có trên MongoDB
-        const loaded = loadConfigFromLocalStorage(name);
-        if (!loaded) {
-          throw new Error(result.message || `Không thể tải cấu hình '${name}'`);
-        }
+        throw new Error(result.message || `Không thể tải cấu hình '${name}'`);
       }
     } catch (error) {
       console.error(`Lỗi khi tải cấu hình '${name}':`, error);
       
-      // Thử lấy từ localStorage nếu server lỗi
-      const loaded = loadConfigFromLocalStorage(name);
-      if (!loaded) {
-        setStatus({
-          loading: false,
-          message: `Lỗi khi tải cấu hình '${name}'`,
-          status: 'error',
-          error: error.message
-        });
-      }
+      setStatus({
+        loading: false,
+        message: `Lỗi khi tải cấu hình '${name}'`,
+        status: 'error',
+        error: error.message
+      });
     }
   };
   
@@ -438,7 +280,6 @@ const OAuthConfig = () => {
         
         // Đặt làm cấu hình active
         setActiveConfig(configName);
-        localStorage.setItem(ACTIVE_CONFIG_KEY, configName);
         
         // Cập nhật danh sách cấu hình từ MongoDB
         fetchConfigsList();
@@ -453,83 +294,22 @@ const OAuthConfig = () => {
         
         // Kiểm tra lại trạng thái xác thực
         checkAuthStatus();
-        
-        // Lưu cả vào localStorage để tương thích ngược
-        try {
-          localStorage.setItem(CONFIG_PREFIX + configName, JSON.stringify(configToSave));
-          
-          // Cập nhật danh sách cấu hình trong localStorage
-          let configsList = [];
-          const savedList = localStorage.getItem(CONFIGS_LIST_KEY);
-          if (savedList) {
-            configsList = JSON.parse(savedList);
-          }
-          
-          // Thêm vào danh sách nếu chưa có
-          if (!configsList.includes(configName)) {
-            configsList.push(configName);
-            localStorage.setItem(CONFIGS_LIST_KEY, JSON.stringify(configsList));
-          }
-        } catch (localStoreError) {
-          console.error('Lỗi khi lưu cấu hình vào localStorage:', localStoreError);
-        }
       } else {
         throw new Error(result.message || 'Không thể lưu cấu hình vào MongoDB');
       }
     } catch (error) {
       console.error('Lỗi khi lưu cấu hình:', error);
       
-      // Nếu lỗi kết nối tới server, vẫn thử lưu vào localStorage
-      try {
-        const configToSave = {
-          clientId: config.clientId, 
-          clientSecret: config.clientSecret,
-          refreshToken: config.refreshToken,
-          baseUrl: config.baseUrl,
-          tokenUrl: config.tokenUrl,
-          appName: config.appName || configName,
-          redirectUri: config.redirectUri,
-          userInfoUrl: config.userInfoUrl
-        };
-        
-        localStorage.setItem(CONFIG_PREFIX + configName, JSON.stringify(configToSave));
-        
-        // Cập nhật danh sách cấu hình
-        let configsList = [];
-        const savedList = localStorage.getItem(CONFIGS_LIST_KEY);
-        if (savedList) {
-          configsList = JSON.parse(savedList);
-        }
-        
-        // Thêm vào danh sách nếu chưa có
-        if (!configsList.includes(configName)) {
-          configsList.push(configName);
-          localStorage.setItem(CONFIGS_LIST_KEY, JSON.stringify(configsList));
-          setSavedConfigs(configsList);
-        }
-        
-        // Đặt làm cấu hình active
-        localStorage.setItem(ACTIVE_CONFIG_KEY, configName);
-        setActiveConfig(configName);
-        
-        setStatus({
-          loading: false,
-          message: 'Lỗi kết nối đến server, đã lưu cấu hình vào localStorage',
-          status: 'warning',
-          error: error.message
-        });
-      } catch (localError) {
-        setStatus({
-          loading: false,
-          message: 'Lỗi khi lưu cấu hình',
-          status: 'error',
-          error: error.message
-        });
-      }
+      setStatus({
+        loading: false,
+        message: 'Lỗi khi lưu cấu hình',
+        status: 'error',
+        error: error.message
+      });
     }
   };
 
-  // Xóa cấu hình từ MongoDB và localStorage
+  // Xóa cấu hình từ MongoDB
   const deleteConfig = async (name) => {
     if (!name) return;
     
@@ -540,44 +320,31 @@ const OAuthConfig = () => {
         message: `Đang xóa cấu hình '${name}'...`
       });
       
-      // Xóa từ MongoDB trước
+      // Xóa từ MongoDB
       const response = await fetch(`${process.env.REACT_APP_API_URL}/api/oauth/config/${name}`, {
         method: 'DELETE'
       });
       
-      // Xóa từ localStorage
-      localStorage.removeItem(CONFIG_PREFIX + name);
+      if (!response.ok) {
+        throw new Error(`Không thể xóa cấu hình '${name}'`);
+      }
       
-      // Cập nhật danh sách cấu hình trong localStorage
-      const configsList = localStorage.getItem(CONFIGS_LIST_KEY);
-      if (configsList) {
-        try {
-          let list = JSON.parse(configsList);
-          list = list.filter(config => config !== name);
-          localStorage.setItem(CONFIGS_LIST_KEY, JSON.stringify(list));
-          setSavedConfigs(list);
-          
-          // Nếu xóa cấu hình đang active, reset state
-          if (name === activeConfig) {
-            localStorage.removeItem(ACTIVE_CONFIG_KEY);
-            setActiveConfig('');
-            setConfigName('');
-            
-            // Reset form
-            setConfig({
-              clientId: '',
-              clientSecret: '',
-              refreshToken: '',
-              baseUrl: 'https://partner.hanet.ai',
-              tokenUrl: 'https://oauth.hanet.com/token',
-              appName: '',
-              redirectUri: '',
-              userInfoUrl: ''
-            });
-          }
-        } catch (error) {
-          console.error('Lỗi khi cập nhật danh sách cấu hình sau khi xóa:', error);
-        }
+      // Nếu xóa cấu hình đang active, reset state
+      if (name === activeConfig) {
+        setActiveConfig('');
+        setConfigName('');
+        
+        // Reset form
+        setConfig({
+          clientId: '',
+          clientSecret: '',
+          refreshToken: '',
+          baseUrl: 'https://partner.hanet.ai',
+          tokenUrl: 'https://oauth.hanet.com/token',
+          appName: '',
+          redirectUri: '',
+          userInfoUrl: ''
+        });
       }
       
       // Cập nhật danh sách cấu hình từ MongoDB
@@ -625,35 +392,23 @@ const OAuthConfig = () => {
     // Cập nhật state
     setConfig(updatedConfig);
     
-    // Nếu đang có cấu hình active thì lưu vào cấu hình đó
-    if (activeConfig) {
-      localStorage.setItem(CONFIG_PREFIX + activeConfig, JSON.stringify(updatedConfig));
-    } else if (configName) {
-      // Nếu đã nhập tên nhưng chưa lưu, lưu luôn
-      localStorage.setItem(CONFIG_PREFIX + configName, JSON.stringify(updatedConfig));
-      localStorage.setItem(ACTIVE_CONFIG_KEY, configName);
-      setActiveConfig(configName);
+    // Nếu đang có cấu hình active, lưu vào MongoDB
+    if (configName) {
+      // Lưu cấu hình vào MongoDB
+      const configToSave = {
+        ...updatedConfig,
+        username: configName
+      };
       
-      // Cập nhật danh sách cấu hình
-      let configsList = [];
-      try {
-        const savedList = localStorage.getItem(CONFIGS_LIST_KEY);
-        if (savedList) {
-          configsList = JSON.parse(savedList);
-        }
-      } catch (error) {
-        console.error('Lỗi khi đọc danh sách cấu hình:', error);
-      }
-      
-      // Thêm vào danh sách nếu chưa có
-      if (!configsList.includes(configName)) {
-        configsList.push(configName);
-        localStorage.setItem(CONFIGS_LIST_KEY, JSON.stringify(configsList));
-        setSavedConfigs(configsList);
-      }
-    } else {
-      // Lưu tạm thời vào localStorage cũ
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedConfig));
+      fetch(`${process.env.REACT_APP_API_URL}/api/oauth/config`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(configToSave)
+      }).catch(error => {
+        console.error('Lỗi khi lưu cấu hình trước khi đăng nhập:', error);
+      });
     }
     
     // URL xác thực Hanet OAuth2
