@@ -85,6 +85,42 @@ app.use((req, res, next) => {
   next();
 });
 
+// Middleware tự động cấu hình xác thực dựa vào placeId
+const autoConfigureByPlaceId = async (req, res, next) => {
+  try {
+    const placeId = req.query.placeId;
+    if (!placeId) {
+      return next();
+    }
+
+    console.log(`[${req.id}] Tự động cấu hình xác thực cho placeId: ${placeId}`);
+
+    // Kết nối đến MongoDB và lấy cấu hình cho placeId
+    const { db } = await mongodbStorage.connectToDatabase();
+    const configCollection = db.collection('oauthConfigs');
+    
+    // Tìm cấu hình cho placeId này
+    const config = await configCollection.findOne({ placeIds: placeId });
+    
+    if (!config) {
+      console.log(`[${req.id}] Không tìm thấy cấu hình cho placeId: ${placeId}`);
+      return next();
+    }
+
+    // Cập nhật cấu hình hiện tại
+    console.log(`[${req.id}] Đã tìm thấy cấu hình cho placeId: ${placeId}, đang áp dụng...`);
+    await tokenManager.setDynamicConfig(config);
+
+    next();
+  } catch (error) {
+    console.error(`[${req.id}] Lỗi khi tự động cấu hình:`, error);
+    next(error);
+  }
+};
+
+// Thêm middleware vào trước các route API
+app.use('/api', autoConfigureByPlaceId);
+
 // 2. Health check route
 app.get("/api", (req, res) => {
   res.send("API Server is running!");
@@ -334,7 +370,7 @@ app.get("/api/checkins", validateCheckinParams, async (req, res, next) => {
 // API cấu hình OAuth
 app.post("/api/oauth/config", async (req, res) => {
   try {
-    const { clientId, clientSecret, refreshToken, baseUrl, tokenUrl, appName, username } = req.body;
+    const { clientId, clientSecret, refreshToken, baseUrl, tokenUrl, appName, username, placeIds } = req.body;
     
     if (!clientId || !clientSecret) {
       return res.status(400).json({
@@ -351,13 +387,14 @@ app.post("/api/oauth/config", async (req, res) => {
       tokenUrl: tokenUrl || "https://oauth.hanet.com/token",
       appName: appName || null,
       username: username || null,
+      placeIds: placeIds || [], // Thêm danh sách placeId được phép sử dụng cấu hình này
       createdAt: new Date()
     };
     
     // Lưu cấu hình vào MongoDB
     const configKey = appName || username || 'default';
     await mongodbStorage.saveOAuthConfig(configKey, config);
-    console.log(`[${new Date().toISOString()}] Đã lưu cấu hình ${configKey} vào MongoDB`);
+    console.log(`[${new Date().toISOString()}] Đã lưu cấu hình ${configKey} vào MongoDB với ${config.placeIds.length} placeId`);
     
     // Cập nhật cấu hình hiện tại
     tokenManager.setDynamicConfig(config);
@@ -365,7 +402,8 @@ app.post("/api/oauth/config", async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Cấu hình OAuth đã được lưu vào MongoDB",
-      configName: configKey
+      configName: configKey,
+      placeIds: config.placeIds
     });
   } catch (error) {
     console.error("Lỗi khi cập nhật cấu hình OAuth:", error);
@@ -697,6 +735,59 @@ app.post("/api/oauth/refresh", async (req, res) => {
       success: false,
       error: 'Token refresh failed',
       message: error.message
+    });
+  }
+});
+
+// API thêm/xóa placeId cho một cấu hình
+app.post("/api/oauth/config/:name/places", async (req, res) => {
+  try {
+    const configName = req.params.name;
+    const { placeIds, action } = req.body; // action: 'add' hoặc 'remove'
+    
+    if (!Array.isArray(placeIds) || !action) {
+      return res.status(400).json({
+        success: false,
+        message: "Cần cung cấp danh sách placeIds và action (add/remove)"
+      });
+    }
+    
+    const { db } = await mongodbStorage.connectToDatabase();
+    const collection = db.collection('oauthConfigs');
+    
+    // Lấy cấu hình hiện tại
+    const currentConfig = await collection.findOne({ _id: configName });
+    if (!currentConfig) {
+      return res.status(404).json({
+        success: false,
+        message: `Không tìm thấy cấu hình: ${configName}`
+      });
+    }
+    
+    // Cập nhật danh sách placeIds
+    let updatedPlaceIds = currentConfig.placeIds || [];
+    if (action === 'add') {
+      updatedPlaceIds = [...new Set([...updatedPlaceIds, ...placeIds])];
+    } else if (action === 'remove') {
+      updatedPlaceIds = updatedPlaceIds.filter(id => !placeIds.includes(id));
+    }
+    
+    // Cập nhật vào database
+    await collection.updateOne(
+      { _id: configName },
+      { $set: { placeIds: updatedPlaceIds } }
+    );
+    
+    return res.status(200).json({
+      success: true,
+      message: `Đã ${action === 'add' ? 'thêm' : 'xóa'} placeIds cho cấu hình ${configName}`,
+      placeIds: updatedPlaceIds
+    });
+  } catch (error) {
+    console.error(`Lỗi khi cập nhật placeIds:`, error);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi khi cập nhật placeIds: " + error.message
     });
   }
 });
