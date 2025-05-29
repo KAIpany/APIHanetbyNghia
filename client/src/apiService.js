@@ -78,30 +78,44 @@ const refreshAuthentication = async () => {
       // Phân tích cấu hình
       const parsedConfig = JSON.parse(configData);
       
-      // Đặt cấu hình này là mặc định (khả năng tương thích)
-      localStorage.setItem('hanet_oauth_config', JSON.stringify(parsedConfig));
+      // Kiểm tra refresh token
+      if (!parsedConfig.refreshToken) {
+        console.error('[apiService] Không có refresh token trong cấu hình');
+        return false;
+      }
       
-      // Gửi cấu hình lên server để làm mới
-      console.log('[apiService] Gửi cấu hình lên server để làm mới xác thực:', parsedConfig.appName || activeConfig);
+      // Gửi yêu cầu làm mới token
+      console.log('[apiService] Gửi yêu cầu làm mới token...');
       
-      const response = await fetch(`${API_URL}/api/oauth/config`, {
+      const response = await fetch(`${API_URL}/api/oauth/refresh`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(parsedConfig)
+        body: JSON.stringify({
+          refreshToken: parsedConfig.refreshToken,
+          clientId: parsedConfig.clientId,
+          clientSecret: parsedConfig.clientSecret
+        })
       });
       
       const result = await response.json();
       
-      if (result.success) {
-        console.log('[apiService] Làm mới xác thực thành công');
+      if (result.success && result.data) {
+        // Cập nhật token mới vào cấu hình
+        parsedConfig.accessToken = result.data.accessToken;
+        if (result.data.refreshToken) {
+          parsedConfig.refreshToken = result.data.refreshToken;
+        }
         
-        // Kiểm tra lại trạng thái xác thực
-        const newStatus = await checkAuthStatus(true);
-        return newStatus && newStatus.status === 'authenticated';
+        // Lưu cấu hình đã cập nhật
+        localStorage.setItem(CONFIG_PREFIX + activeConfig, JSON.stringify(parsedConfig));
+        localStorage.setItem('hanet_oauth_config', JSON.stringify(parsedConfig));
+        
+        console.log('[apiService] Làm mới token thành công');
+        return true;
       } else {
-        console.error('[apiService] Làm mới xác thực thất bại:', result.message);
+        console.error('[apiService] Làm mới token thất bại:', result.message);
         return false;
       }
     })();
@@ -117,50 +131,88 @@ const refreshAuthentication = async () => {
 };
 
 // Xử lý các yêu cầu API với tự động làm mới xác thực
-const fetchWithAuth = async (url, options = {}) => {
-  console.log('Calling API:', url);
-  const response = await fetch(url, options);
-  const data = await response.json();
+const fetchWithAuth = async (url, options = {}, retryCount = 0) => {
+  const MAX_RETRIES = 3;
+  
+  try {
+    console.log('Calling API:', url);
+    const response = await fetch(url, options);
+    const data = await response.json();
 
-  if (!response.ok) {
-    console.error('API error:', data);
-    throw new Error(data.message || 'API request failed');
+    // Kiểm tra nếu có lỗi xác thực
+    if (!response.ok && (response.status === 401 || response.status === 403 || 
+        (data.error && data.error.includes('Authentication failed')))) {
+      console.log('Phát hiện lỗi xác thực, thử làm mới token...');
+      
+      // Chỉ thử làm mới token nếu chưa vượt quá số lần thử lại
+      if (retryCount < MAX_RETRIES) {
+        // Thử làm mới xác thực
+        const refreshed = await refreshAuthentication();
+        if (refreshed) {
+          console.log('Làm mới token thành công, thử lại request...');
+          // Thử lại request với token mới
+          return fetchWithAuth(url, options, retryCount + 1);
+        }
+      }
+      
+      throw new Error('Không thể xác thực với Hanet API sau nhiều lần thử');
+    }
+
+    if (!response.ok) {
+      console.error('API error:', data);
+      throw new Error(data.message || 'API request failed');
+    }
+
+    if (data.success === false) {
+      // Kiểm tra nếu là lỗi xác thực
+      if (data.error === 'Authentication failed' || data.message?.includes('authenticate')) {
+        if (retryCount < MAX_RETRIES) {
+          console.log('Phát hiện lỗi xác thực từ response, thử làm mới token...');
+          const refreshed = await refreshAuthentication();
+          if (refreshed) {
+            console.log('Làm mới token thành công, thử lại request...');
+            return fetchWithAuth(url, options, retryCount + 1);
+          }
+        }
+        throw new Error('Không thể xác thực với Hanet API sau nhiều lần thử');
+      }
+      throw new Error(data.message || 'Request was not successful');
+    }
+
+    // Log response data for debugging
+    console.log('API Response:', data);
+
+    // Case 1: Response has success and data structure (most common case)
+    if (data.success && data.data) {
+      console.log('Found success and data structure');
+      return Array.isArray(data.data) ? data.data : [data.data];
+    }
+
+    // Case 2: Response has metadata and data structure
+    if (data.metadata && data.data) {
+      console.log('Found metadata and data structure');
+      return Array.isArray(data.data) ? data.data : [data.data];
+    }
+
+    // Case 3: Response is an array directly
+    if (Array.isArray(data)) {
+      console.log('Found direct array response');
+      return data;
+    }
+
+    // Case 4: Response has only data field
+    if (data.data) {
+      console.log('Found data field only');
+      return Array.isArray(data.data) ? data.data : [data.data];
+    }
+
+    // No valid data found
+    console.warn('Unexpected API response format:', data);
+    return [];
+  } catch (error) {
+    console.error('Error in fetchWithAuth:', error);
+    throw error;
   }
-
-  if (data.success === false) {
-    throw new Error(data.message || 'Request was not successful');
-  }
-
-  // Log response data for debugging
-  console.log('API Response:', data);
-
-  // Case 1: Response has success and data structure (most common case)
-  if (data.success && data.data) {
-    console.log('Found success and data structure');
-    return Array.isArray(data.data) ? data.data : [data.data];
-  }
-
-  // Case 2: Response has metadata and data structure
-  if (data.metadata && data.data) {
-    console.log('Found metadata and data structure');
-    return Array.isArray(data.data) ? data.data : [data.data];
-  }
-
-  // Case 3: Response is an array directly
-  if (Array.isArray(data)) {
-    console.log('Found direct array response');
-    return data;
-  }
-
-  // Case 4: Response has only data field
-  if (data.data) {
-    console.log('Found data field only');
-    return Array.isArray(data.data) ? data.data : [data.data];
-  }
-
-  // No valid data found
-  console.warn('Unexpected API response format:', data);
-  return [];
 };
 
 // Hàm sleep helper
