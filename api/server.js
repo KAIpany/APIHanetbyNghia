@@ -494,7 +494,7 @@ app.delete("/api/oauth/config/:name", async (req, res) => {
   }
 });
 
-// API xử lý OAuth callback - cập nhật để lưu vào MongoDB
+// API xử lý OAuth callback - cập nhật để lưu vào MongoDB và tự động thêm placeIds
 app.get("/api/oauth/callback", async (req, res) => {
   try {
     const { code, redirect_uri, configName } = req.query;
@@ -520,8 +520,31 @@ app.get("/api/oauth/callback", async (req, res) => {
         const existingConfig = await mongodbStorage.getOAuthConfig(configName);
         if (existingConfig) {
           existingConfig.refreshToken = tokenData.refreshToken;
+          
+          // Lấy danh sách places của người dùng
+          console.log("[OAuth Callback] Đang lấy danh sách places...");
+          const placesResponse = await fetch(`${existingConfig.baseUrl || 'https://partner.hanet.ai'}/api/v3/place`, {
+            headers: {
+              'Authorization': `Bearer ${tokenData.accessToken}`
+            }
+          });
+          
+          const placesData = await placesResponse.json();
+          
+          if (placesData.code === '1' && Array.isArray(placesData.data)) {
+            console.log(`[OAuth Callback] Tìm thấy ${placesData.data.length} places`);
+            
+            // Lấy danh sách placeIds
+            const placeIds = placesData.data.map(place => place.id.toString());
+            
+            // Thêm vào cấu hình
+            existingConfig.placeIds = [...new Set([...(existingConfig.placeIds || []), ...placeIds])];
+            console.log(`[OAuth Callback] Đã thêm ${placeIds.length} placeIds vào cấu hình`);
+          }
+          
+          // Lưu cấu hình đã cập nhật
           await mongodbStorage.saveOAuthConfig(configName, existingConfig);
-          console.log(`[${new Date().toISOString()}] Đã cập nhật refresh token cho cấu hình ${configName}`);
+          console.log(`[${new Date().toISOString()}] Đã cập nhật refresh token và placeIds cho cấu hình ${configName}`);
         }
       } catch (storageError) {
         console.error(`[${new Date().toISOString()}] Lỗi lưu token vào MongoDB:`, storageError);
@@ -788,6 +811,67 @@ app.post("/api/oauth/config/:name/places", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Lỗi khi cập nhật placeIds: " + error.message
+    });
+  }
+});
+
+// API đồng bộ places với cấu hình
+app.post("/api/oauth/config/:name/sync-places", async (req, res) => {
+  try {
+    const configName = req.params.name;
+    
+    // Lấy cấu hình hiện tại
+    const config = await mongodbStorage.getOAuthConfig(configName);
+    if (!config) {
+      return res.status(404).json({
+        success: false,
+        message: `Không tìm thấy cấu hình: ${configName}`
+      });
+    }
+    
+    // Lấy token hợp lệ
+    await tokenManager.setDynamicConfig(config);
+    const token = await tokenManager.getValidHanetToken(true);
+    
+    // Lấy danh sách places
+    console.log(`[Places Sync] Đang lấy danh sách places cho cấu hình ${configName}...`);
+    const placesResponse = await fetch(`${config.baseUrl || 'https://partner.hanet.ai'}/api/v3/place`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    
+    const placesData = await placesResponse.json();
+    
+    if (placesData.code !== '1' || !Array.isArray(placesData.data)) {
+      throw new Error('Không thể lấy danh sách places: ' + JSON.stringify(placesData));
+    }
+    
+    // Lấy danh sách placeIds
+    const placeIds = placesData.data.map(place => place.id.toString());
+    
+    // Cập nhật cấu hình
+    config.placeIds = [...new Set([...(config.placeIds || []), ...placeIds])];
+    await mongodbStorage.saveOAuthConfig(configName, config);
+    
+    console.log(`[Places Sync] Đã cập nhật ${placeIds.length} placeIds cho cấu hình ${configName}`);
+    
+    return res.status(200).json({
+      success: true,
+      message: `Đã đồng bộ ${placeIds.length} places cho cấu hình ${configName}`,
+      data: {
+        placeIds: config.placeIds,
+        places: placesData.data.map(place => ({
+          id: place.id,
+          name: place.name
+        }))
+      }
+    });
+  } catch (error) {
+    console.error(`[Places Sync] Lỗi:`, error);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi khi đồng bộ places: " + error.message
     });
   }
 });
