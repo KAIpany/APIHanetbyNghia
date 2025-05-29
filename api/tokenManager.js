@@ -15,16 +15,10 @@ let cachedTokenData = {
 
 let currentUsername = null; // Tài khoản đang sử dụng
 
-// Khởi tạo và tải token từ storage ngay khi module được import
-(async function initializeModule() {
-  try {
-    console.log(`[${new Date().toISOString()}] Khởi tạo TokenManager...`);
-    await initializeTokens();
-  } catch (error) {
-    console.error(`[${new Date().toISOString()}] Lỗi khi khởi tạo TokenManager:`, error.message);
-  }
-})();
+// Lưu trữ cấu hình động từ client
+let dynamicConfig = null;
 
+// Khai báo hàm initializeTokens trước khi sử dụng
 // Khởi tạo và tải token từ storage
 const initializeTokens = async () => {
   try {
@@ -84,8 +78,15 @@ const initializeTokens = async () => {
   }
 };
 
-// Lưu trữ cấu hình động từ client
-let dynamicConfig = null;
+// Khởi tạo và tải token từ storage ngay khi module được import
+(async function initializeModule() {
+  try {
+    console.log(`[${new Date().toISOString()}] Khởi tạo TokenManager...`);
+    await initializeTokens();
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Lỗi khi khởi tạo TokenManager:`, error.message);
+  }
+})();
 
 // Thiết lập cấu hình động từ client
 async function setDynamicConfig(config) {
