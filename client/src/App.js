@@ -1089,6 +1089,29 @@ const CheckInApp = () => {
     }
   }, [accounts]);
 
+  // Render authentication status function
+  const renderAuthStatus = () => {
+    if (!authStatus) {
+      return <div className="auth-status loading">Đang kiểm tra trạng thái xác thực...</div>;
+    } else if (authStatus === 'authenticated') {
+      return <div className="auth-status authenticated">Đã xác thực</div>;
+    } else if (authStatus === 'expired') {
+      return (
+        <div className="auth-status expired">
+          Xác thực đã hết hạn
+          <button onClick={() => apiService.refreshAuthentication().then(() => checkAuthStatus(true))}>Làm mới</button>
+        </div>
+      );
+    } else {
+      return (
+        <div className="auth-status unauthenticated">
+          Chưa xác thực
+          <Link to="/oauth-config" className="auth-link">Đăng nhập</Link>
+        </div>
+      );
+    }
+  };
+
   const renderAccountMenu = () => {
     if (!showAccountMenu) return null;
 
