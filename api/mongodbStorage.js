@@ -11,24 +11,54 @@ const CONFIGS_COLLECTION = 'oauthConfigs';
 let cachedClient = null;
 let cachedDb = null;
 
-// Kết nối đến MongoDB
+// Kết nối đến MongoDB - phiên bản tối ưu cho serverless
 async function connectToDatabase() {
   // Nếu đã có kết nối, sử dụng lại
   if (cachedClient && cachedDb) {
     return { client: cachedClient, db: cachedDb };
   }
 
-  // Nếu chưa có kết nối, tạo mới
-  try {
-    const client = await MongoClient.connect(MONGODB_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-      maxPoolSize: 10, // Giới hạn số kết nối trong pool
-      connectTimeoutMS: 5000, // Timeout kết nối
-      serverSelectionTimeoutMS: 5000 // Timeout chọn server
-    });
+  // Thiết lập hàm timeout
+  const connectWithTimeout = (timeoutMs = 5000) => {
+    return new Promise(async (resolve, reject) => {
+      // Tạo timeout
+      const timeoutId = setTimeout(() => {
+        reject(new Error(`MongoDB connection timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      
+      try {
+        const client = new MongoClient(MONGODB_URI, {
+          useNewUrlParser: true,
+          useUnifiedTopology: true,
+          maxPoolSize: 5, // Giảm pool size cho serverless
+          connectTimeoutMS: 3000, // Giảm timeout kết nối
+          serverSelectionTimeoutMS: 3000, // Giảm timeout chọn server
+          socketTimeoutMS: 5000, // Thêm giới hạn thời gian socket
+          directConnection: false // Cho phép kết nối qua replica set
+        });
 
-    const db = client.db(DB_NAME);
+        // Thử kết nối
+        await client.connect();
+        const db = client.db(DB_NAME);
+        
+        // Kết nối thành công, hủy timeout
+        clearTimeout(timeoutId);
+        
+        // Trả về kết nối
+        resolve({ client, db });
+      } catch (error) {
+        // Lỗi kết nối, hủy timeout
+        clearTimeout(timeoutId);
+        reject(error);
+      }
+    });
+  };
+
+  // Nếu chưa có kết nối, tạo mới với timeout
+  try {
+    console.log(`[${new Date().toISOString()}] Đang kết nối đến MongoDB...`);
+    const { client, db } = await connectWithTimeout(3000);
+
     console.log(`[${new Date().toISOString()}] Đã kết nối thành công đến MongoDB`);
     
     // Lưu kết nối vào cache
@@ -38,6 +68,24 @@ async function connectToDatabase() {
     return { client, db };
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Lỗi kết nối MongoDB:`, error.message);
+    
+    // Nếu đang chạy trong môi trường serverless của Vercel, trả về dummy DB
+    // để tránh timeout function
+    if (process.env.VERCEL === '1') {
+      console.warn(`[${new Date().toISOString()}] Đang chạy trên Vercel, trả về dummy DB`);
+      return {
+        client: { close: () => {} },
+        db: {
+          collection: () => ({
+            findOne: async () => null,
+            find: async () => ({ toArray: async () => [] }),
+            updateOne: async () => ({ modifiedCount: 0 }),
+            deleteOne: async () => ({ deletedCount: 0 })
+          })
+        }
+      };
+    }
+    
     throw error;
   }
 }

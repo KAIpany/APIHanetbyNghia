@@ -471,16 +471,36 @@ app.get("/api/oauth/config/:name", async (req, res) => {
   }
 });
 
-// API kích hoạt cấu hình OAuth
+// API kích hoạt cấu hình OAuth - phiên bản tối ưu cho serverless
 app.post("/api/oauth/activate/:name", async (req, res) => {
   const requestId = req.id;
   const configName = req.params.name;
   
   console.log(`[${requestId}] Yêu cầu kích hoạt cấu hình: ${configName}`);
   
+  // Khởi tạo hàm tạo timeout
+  const timeoutPromise = (promise, timeoutMs = 3000) => {
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error(`Operation timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+    });
+    return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
+  };
+  
   try {
-    // Tìm cấu hình trong MongoDB
-    const config = await mongodbStorage.getOAuthConfig(configName);
+    // Tìm cấu hình trong MongoDB với timeout
+    let config;
+    try {
+      config = await timeoutPromise(mongodbStorage.getOAuthConfig(configName), 3000);
+    } catch (timeoutErr) {
+      console.error(`[${requestId}] Timeout khi tải cấu hình: ${timeoutErr.message}`);
+      return res.status(504).json({
+        success: false,
+        message: `Timeout khi tải cấu hình ${configName}. Vui lòng thử lại.`
+      });
+    }
     
     if (!config) {
       return res.status(404).json({
@@ -491,49 +511,60 @@ app.post("/api/oauth/activate/:name", async (req, res) => {
     
     console.log(`[${requestId}] Đã tìm thấy cấu hình ${configName}, đang kích hoạt...`);
     
-    // Đặt làm cấu hình active trong MongoDB
-    await mongodbStorage.setActiveConfig(configName);
+    // Thực hiện song song các thao tác không phụ thuộc nhau để tối ưu thời gian
+    const [setActiveResult, setDynamicResult] = await Promise.allSettled([
+      // Đặt làm cấu hình active trong MongoDB
+      timeoutPromise(mongodbStorage.setActiveConfig(configName), 2000),
+      // Cập nhật cấu hình hiện tại trong tokenManager
+      timeoutPromise(Promise.resolve(tokenManager.setDynamicConfig(config)), 1000)
+    ]);
     
-    // Cập nhật cấu hình hiện tại trong tokenManager
-    await tokenManager.setDynamicConfig(config);
+    // Báo cáo nếu có lỗi nhưng không ngừng tiến trình
+    if (setActiveResult.status === 'rejected') {
+      console.error(`[${requestId}] Lỗi khi đặt cấu hình active:`, setActiveResult.reason?.message || 'Unknown error');
+    }
     
-    // Đặt tài khoản hiện tại
+    if (setDynamicResult.status === 'rejected') {
+      console.error(`[${requestId}] Lỗi khi cập nhật cấu hình:`, setDynamicResult.reason?.message || 'Unknown error');
+    }
+    
+    // Đặt tài khoản hiện tại (không cần đợi)
     tokenManager.useAccount(configName);
     
     console.log(`[${requestId}] Đã kích hoạt cấu hình ${configName} thành công`);
     
-    // Kiểm tra và làm mới token ngay lập tức
+    // Trả kết quả ngay mà không chờ làm mới token
+    const response = {
+      success: true,
+      message: `Đã kích hoạt cấu hình: ${configName}`,
+      auth: {
+        status: "configured",
+        message: "Đã cấu hình, đang kiểm tra token"
+      }
+    };
+    
+    // Gửi response trước, sau đó thử làm mới token trong background
+    res.status(200).json(response);
+    
+    // Làm mới token trong background sau khi đã trả response
     try {
-      console.log(`[${requestId}] Đang thử làm mới token với cấu hình ${configName}...`);
-      const token = await tokenManager.getValidHanetToken();
-      
-      return res.status(200).json({
-        success: true,
-        message: `Đã kích hoạt cấu hình: ${configName}`,
-        auth: {
-          status: "authenticated",
-          message: "Đã xác thực thành công"
-        }
-      });
+      console.log(`[${requestId}] Background: Đang làm mới token với cấu hình ${configName}...`);
+      await tokenManager.getValidHanetToken();
+      console.log(`[${requestId}] Background: Làm mới token thành công`);
     } catch (tokenError) {
-      console.error(`[${requestId}] Lỗi khi làm mới token:`, tokenError.message);
-      
-      // Vẫn trả về thành công nhưng với thông báo lỗi token
-      return res.status(200).json({
-        success: true,
-        message: `Đã kích hoạt cấu hình: ${configName}`,
-        auth: {
-          status: "error",
-          message: `Lỗi xác thực: ${tokenError.message}`
-        }
-      });
+      console.error(`[${requestId}] Background: Lỗi khi làm mới token:`, tokenError.message);
     }
+    
+    return; // Đã gửi response, không cần return gì thêm
   } catch (error) {
     console.error(`[${requestId}] Lỗi khi kích hoạt cấu hình ${configName}:`, error);
-    return res.status(500).json({
-      success: false,
-      message: "Lỗi khi kích hoạt cấu hình: " + error.message
-    });
+    // Nếu chưa gửi response, gửi lỗi
+    if (!res.headersSent) {
+      return res.status(500).json({
+        success: false,
+        message: "Lỗi khi kích hoạt cấu hình: " + error.message
+      });
+    }
   }
 });
 
@@ -641,64 +672,94 @@ app.get("/api/oauth/callback", async (req, res) => {
   }
 });
 
-// API kiểm tra trạng thái xác thực
+// API kiểm tra trạng thái xác thực - phiên bản tối ưu cho serverless
 app.get("/api/oauth/status", async (req, res) => {
   const requestId = req.id;
   console.log(`[${requestId}] Kiểm tra trạng thái xác thực OAuth`);
   
   try {
-    // Trước tiên, tải cấu hình mới nhất từ MongoDB nếu có
-    let freshConfig = null;
-    let configName = null;
+    // Sử dụng Promise.race để tạo timeout cho các thao tác database
+    const timeoutPromise = (promise, timeoutMs = 3000) => {
+      let timeoutId;
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`Operation timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      });
+      return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
+    };
     
-    try {
-      // Thử lấy tên cấu hình đang hoạt động từ server hoặc database
-      const activeConfigData = await mongodbStorage.getActiveConfig();
-      if (activeConfigData && activeConfigData.name) {
-        configName = activeConfigData.name;
-        console.log(`[${requestId}] Tìm thấy cấu hình đang hoạt động: ${configName}`);
-        
-        // Tải cấu hình từ MongoDB
-        const storedConfig = await mongodbStorage.getConfig(configName);
-        if (storedConfig && storedConfig.clientId && storedConfig.clientSecret) {
-          console.log(`[${requestId}] Đã tải cấu hình ${configName} từ MongoDB`);
-          freshConfig = storedConfig;
-          
-          // Cập nhật cấu hình trong tokenManager
-          await tokenManager.setDynamicConfig(freshConfig);
-        }
-      }
-    } catch (dbError) {
-      console.error(`[${requestId}] Lỗi khi tải cấu hình từ MongoDB:`, dbError.message);
-    }
-    
-    // Nếu không tìm thấy cấu hình mới, sử dụng cấu hình hiện tại
-    const config = freshConfig || tokenManager.getCurrentConfig();
+    // Trước tiên, tải cấu hình hiện tại ngay lập tức
+    const config = tokenManager.getCurrentConfig();
     let status = "unconfigured";
     let message = "Chưa cấu hình OAuth";
     let tokenInfo = null;
+    let configName = null;
     
+    // Kiểm tra xem đã có cấu hình chưa
     if (config.clientId && config.clientSecret) {
       status = "configured";
       message = "Đã cấu hình OAuth";
       
+      // Song song tải cấu hình active và kiểm tra token
       try {
-        console.log(`[${requestId}] Đang thử làm mới token với cấu hình ${configName || 'hiện tại'}`);
-        const token = await tokenManager.getValidHanetToken();
-        if (token) {
-          status = "authenticated";
-          message = "Đã xác thực thành công";
+        // Song song các thao tác database để tối ưu thời gian
+        const [activeConfigData, tokenResult] = await Promise.allSettled([
+          // Tải cấu hình active (có timeout)
+          timeoutPromise(mongodbStorage.getActiveConfig(), 2000),
+          // Thử làm mới token
+          (async () => {
+            try {
+              return await tokenManager.getValidHanetToken();
+            } catch (err) {
+              return { error: err };
+            }
+          })()
+        ]);
+        
+        // Xử lý kết quả tải cấu hình active
+        if (activeConfigData.status === 'fulfilled' && activeConfigData.value && activeConfigData.value.name) {
+          configName = activeConfigData.value.name;
+          console.log(`[${requestId}] Tìm thấy cấu hình đang hoạt động: ${configName}`);
           
-          // Thêm thông tin về token để client có thể xử lý tốt hơn
-          tokenInfo = {
-            accessToken: token.substring(0, 10) + '...',  // Chỉ hiển thị 10 ký tự đầu
-            configName: configName || 'default'
-          };
+          // Tải cấu hình ngay lập tức nếu cần - nhưng đặt timeout ngắn
+          try {
+            const storedConfig = await timeoutPromise(mongodbStorage.getConfig(configName), 2000);
+            if (storedConfig && storedConfig.clientId && storedConfig.clientSecret) {
+              // Đảm bảo cập nhật config trong background, không chờ
+              tokenManager.setDynamicConfig(storedConfig)
+                .catch(err => console.error(`[${requestId}] Lỗi khi cập nhật cấu hình:`, err.message));
+            }
+          } catch (configErr) {
+            console.log(`[${requestId}] Timeout khi tải cấu hình, tiếp tục với cấu hình hiện tại`);
+          }
         }
-      } catch (tokenError) {
-        status = "error";
-        message = "Lỗi xác thực: " + tokenError.message;
-        console.error(`[${requestId}] Lỗi khi làm mới token:`, tokenError.message);
+        
+        // Xử lý kết quả kiểm tra token
+        if (tokenResult.status === 'fulfilled') {
+          const token = tokenResult.value;
+          if (token && !token.error) {
+            status = "authenticated";
+            message = "Đã xác thực thành công";
+            
+            // Thêm thông tin về token để client có thể xử lý tốt hơn
+            tokenInfo = {
+              accessToken: token.substring(0, 10) + '...',  // Chỉ hiển thị 10 ký tự đầu
+              configName: configName || 'default'
+            };
+          } else if (token && token.error) {
+            status = "error";
+            message = "Lỗi xác thực: " + token.error.message;
+            console.error(`[${requestId}] Lỗi khi làm mới token:`, token.error.message);
+          }
+        } else if (tokenResult.status === 'rejected') {
+          status = "error";
+          message = "Lỗi xác thực: " + tokenResult.reason.message;
+          console.error(`[${requestId}] Lỗi khi làm mới token:`, tokenResult.reason.message);
+        }
+      } catch (generalError) {
+        console.error(`[${requestId}] Lỗi chung khi kiểm tra trạng thái:`, generalError.message);
+        // Vẫn tiếp tục với trạng thái configured nếu có lỗi
       }
     }
     
