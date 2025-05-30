@@ -19,7 +19,7 @@ async function connectToDatabase() {
   }
 
   // Thiết lập hàm timeout
-  const connectWithTimeout = (timeoutMs = 5000) => {
+  const connectWithTimeout = (timeoutMs = 10000) => {
     return new Promise(async (resolve, reject) => {
       // Tạo timeout
       const timeoutId = setTimeout(() => {
@@ -30,11 +30,13 @@ async function connectToDatabase() {
         const client = new MongoClient(MONGODB_URI, {
           useNewUrlParser: true,
           useUnifiedTopology: true,
-          maxPoolSize: 5, // Giảm pool size cho serverless
-          connectTimeoutMS: 3000, // Giảm timeout kết nối
-          serverSelectionTimeoutMS: 3000, // Giảm timeout chọn server
-          socketTimeoutMS: 5000, // Thêm giới hạn thời gian socket
-          directConnection: false // Cho phép kết nối qua replica set
+          maxPoolSize: 1, // Giảm pool size tối đa cho serverless
+          connectTimeoutMS: 8000, // Tăng timeout kết nối
+          serverSelectionTimeoutMS: 8000, // Tăng timeout chọn server
+          socketTimeoutMS: 10000, // Tăng giới hạn thời gian socket
+          directConnection: false, // Cho phép kết nối qua replica set
+          retryWrites: true, // Cho phép retry writes
+          retryReads: true // Cho phép retry reads
         });
 
         // Thử kết nối
@@ -57,7 +59,7 @@ async function connectToDatabase() {
   // Nếu chưa có kết nối, tạo mới với timeout
   try {
     console.log(`[${new Date().toISOString()}] Đang kết nối đến MongoDB...`);
-    const { client, db } = await connectWithTimeout(3000);
+    const { client, db } = await connectWithTimeout(8000);
 
     console.log(`[${new Date().toISOString()}] Đã kết nối thành công đến MongoDB`);
     
@@ -69,9 +71,39 @@ async function connectToDatabase() {
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Lỗi kết nối MongoDB:`, error.message);
     
-    // Nếu đang chạy trong môi trường serverless của Vercel, trả về dummy DB
-    // để tránh timeout function
+    // Nếu đang chạy trong môi trường serverless của Vercel, thử kết nối đến MongoDB Atlas
+    // với cấu hình dự phòng trước khi trả về dummy DB
     if (process.env.VERCEL === '1') {
+      // Thử sử dụng chuỗi kết nối dự phòng nếu có
+      const backupUri = process.env.MONGODB_URI_BACKUP;
+      if (backupUri && backupUri !== MONGODB_URI) {
+        try {
+          console.warn(`[${new Date().toISOString()}] Thử kết nối đến MongoDB với URI dự phòng...`);
+          const backupClient = new MongoClient(backupUri, {
+            useNewUrlParser: true,
+            useUnifiedTopology: true,
+            maxPoolSize: 1,
+            connectTimeoutMS: 10000,
+            serverSelectionTimeoutMS: 10000,
+            socketTimeoutMS: 12000,
+            retryWrites: true,
+            retryReads: true
+          });
+          
+          await backupClient.connect();
+          const backupDb = backupClient.db(DB_NAME);
+          
+          // Lưu kết nối vào cache
+          cachedClient = backupClient;
+          cachedDb = backupDb;
+          
+          console.log(`[${new Date().toISOString()}] Kết nối thành công đến MongoDB dự phòng`);
+          return { client: backupClient, db: backupDb };
+        } catch (backupError) {
+          console.error(`[${new Date().toISOString()}] Lỗi kết nối MongoDB dự phòng:`, backupError.message);
+        }
+      }
+      
       console.warn(`[${new Date().toISOString()}] Đang chạy trên Vercel, trả về dummy DB`);
       return {
         client: { close: () => {} },
