@@ -419,10 +419,16 @@ async function getStoredConfigNames() {
   }
 }
 
+// Alias for loadOAuthConfig for compatibility with new API
+async function getOAuthConfig(configName) {
+  return await loadOAuthConfig(configName);
+}
+
 module.exports = {
   saveTokens,
   loadTokens,
   saveOAuthConfig,
   loadOAuthConfig,
+  getOAuthConfig,
   getStoredConfigNames
 };

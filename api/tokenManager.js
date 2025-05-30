@@ -215,7 +215,40 @@ async function getValidHanetToken() {
   }
 
   try {
-    const config = getCurrentConfig();
+    // Đảm bảo lấy cấu hình mới nhất từ storage
+    // Nếu tài khoản hiện tại được xác định, hãy tải cấu hình cụ thể
+    let config;
+    if (currentUsername) {
+      try {
+        // Tải cấu hình từ file nếu ở môi trường development
+        if (process.env.NODE_ENV !== 'production') {
+          const fileConfig = localConfigStore.loadConfig(currentUsername);
+          if (fileConfig && fileConfig.refreshToken) {
+            console.log(`[${new Date().toISOString()}] Tải cấu hình cho user ${currentUsername} từ file thành công`);
+            dynamicConfig = fileConfig;
+            config = fileConfig;
+          }
+        }
+
+        // Nếu không lấy được từ file hoặc không phải môi trường development, lấy từ MongoDB
+        if (!config) {
+          const storedConfig = await tokenStorage.getOAuthConfig(currentUsername);
+          if (storedConfig) {
+            console.log(`[${new Date().toISOString()}] Tải cấu hình cho user ${currentUsername} từ MongoDB thành công`);
+            dynamicConfig = storedConfig;
+            config = storedConfig;
+          }
+        }
+      } catch (configError) {
+        console.error(`[${new Date().toISOString()}] Lỗi khi tải cấu hình cho ${currentUsername}:`, configError.message);
+      }
+    }
+
+    // Nếu không lấy được cấu hình cụ thể, sử dụng cấu hình hiện tại
+    if (!config) {
+      config = getCurrentConfig();
+    }
+
     const refreshToken = cachedTokenData.refreshToken || config.refreshToken;
     
     if (!refreshToken) {
@@ -225,6 +258,14 @@ async function getValidHanetToken() {
     if (!config.clientId || !config.clientSecret) {
       throw new Error("Thiếu thông tin Client ID hoặc Client Secret");
     }
+
+    // Log thông tin debug (xóa trong production)
+    console.log(`[${new Date().toISOString()}] Token refresh info:`, {
+      tokenUrl: config.tokenUrl,
+      clientIdLength: config.clientId ? config.clientId.length : 0,
+      refreshTokenLength: refreshToken ? refreshToken.length : 0,
+      currentUsername: currentUsername
+    });
 
     // Sử dụng tokenUrl thay vì tạo URL từ baseUrl
     const url = config.tokenUrl || "https://oauth.hanet.com/token";
@@ -278,6 +319,16 @@ async function getValidHanetToken() {
               await tokenStorage.saveOAuthConfig(dynamicConfig.appName, dynamicConfig);
             }
             
+            // Nếu có username, lưu theo username
+            if (currentUsername) {
+              await tokenStorage.saveOAuthConfig(currentUsername, dynamicConfig);
+              
+              // Cập nhật trong file nếu ở môi trường development
+              if (process.env.NODE_ENV !== 'production') {
+                localConfigStore.saveConfig(currentUsername, dynamicConfig);
+              }
+            }
+            
             // Gửi thông báo tới client để cập nhật refresh token nếu cần
             console.log(`[${new Date().toISOString()}] Đã nhận refresh token mới và cập nhật cấu hình`);
           }
@@ -293,10 +344,23 @@ async function getValidHanetToken() {
   } catch (error) {
     const errorMessage = error.response?.data?.error_description || error.message;
     console.error(`[${new Date().toISOString()}] Lỗi khi làm mới token: ${errorMessage}`);
+    console.error(`[${new Date().toISOString()}] Response data:`, error.response?.data);
     
     // Reset token để tránh dùng token lỗi
     cachedTokenData.accessToken = null;
     cachedTokenData.expiresAt = null;
+    
+    // Nếu lỗi là do token hết hạn, hãy xóa refresh token để buộc đăng nhập lại
+    if (error.response?.status === 400 && 
+        (errorMessage.includes('invalid_grant') || 
+         errorMessage.includes('invalid refresh token') || 
+         errorMessage.includes('expired'))) {
+      console.log(`[${new Date().toISOString()}] Refresh token không hợp lệ hoặc hết hạn, xóa khỏi bộ nhớ`);
+      cachedTokenData.refreshToken = null;
+      
+      // Báo hiệu client rằng cần đăng nhập lại
+      throw new Error(`Token đã hết hạn hoặc bị thu hồi. Vui lòng đăng nhập lại: ${errorMessage}`);
+    }
     
     throw new Error(`Không thể làm mới token: ${errorMessage}`);
   }
