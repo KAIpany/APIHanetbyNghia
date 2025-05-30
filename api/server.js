@@ -1213,7 +1213,7 @@ app.use((err, req, res, next) => {
   if (err.code === 'ETIMEDOUT' || err.code === 'ESOCKETTIMEDOUT') {
     return res.status(504).json({
       success: false,
-      message: 'Request timeout. Vui lòng thử lại với khoảng thời gian ngắn hơn.'
+      message: 'Request timeoutt. Vui lòng thử lại với khoảng thời gian ngắn hơn.'
     });
   }
 
