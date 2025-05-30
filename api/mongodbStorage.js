@@ -28,8 +28,6 @@ async function connectToDatabase() {
       
       try {
         const client = new MongoClient(MONGODB_URI, {
-          useNewUrlParser: true,
-          useUnifiedTopology: true,
           maxPoolSize: 1, // Giảm pool size tối đa cho serverless
           connectTimeoutMS: 8000, // Tăng timeout kết nối
           serverSelectionTimeoutMS: 8000, // Tăng timeout chọn server
@@ -80,8 +78,6 @@ async function connectToDatabase() {
         try {
           console.warn(`[${new Date().toISOString()}] Thử kết nối đến MongoDB với URI dự phòng...`);
           const backupClient = new MongoClient(backupUri, {
-            useNewUrlParser: true,
-            useUnifiedTopology: true,
             maxPoolSize: 1,
             connectTimeoutMS: 10000,
             serverSelectionTimeoutMS: 10000,

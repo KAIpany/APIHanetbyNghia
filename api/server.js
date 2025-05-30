@@ -1234,7 +1234,7 @@ async function setupTokenRefreshCron() {
   
   // Lấy cấu hình active
   try {
-    const activeConfig = await tokenStorage.getActiveConfig();
+    const activeConfig = await mongodbStorage.getActiveConfig();
     if (activeConfig && activeConfig.configName) {
       console.log(`[AUTO-REFRESH] Thiết lập cron job làm mới token tự động cho cấu hình: ${activeConfig.configName}`);
       
