@@ -10,7 +10,7 @@ const crypto = require('crypto');
 const mongodbStorage = require('./mongodbStorage');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3333;
 
 // Request ID middleware
 app.use((req, res, next) => {
@@ -1222,65 +1222,98 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Thiết lập cơ chế tự động làm mới token mỗi 12 giờ
-let tokenRefreshInterval;
-
-async function setupTokenRefreshCron() {
-  // Hủy interval cũ nếu có
-  if (tokenRefreshInterval) {
-    clearInterval(tokenRefreshInterval);
-  }
-  
-  // Lấy cấu hình active
+// Hàm tự động kích hoạt OAuth khi khởi động server
+async function autoActivateOAuth() {
   try {
-    const activeConfig = await tokenStorage.getActiveConfig();
-    if (activeConfig && activeConfig.configName) {
-      console.log(`[AUTO-REFRESH] Thiết lập cron job làm mới token tự động cho cấu hình: ${activeConfig.configName}`);
+    console.log('[AUTO-CONNECT] Đang tự động kích hoạt OAuth khi khởi động server...');
+    
+    // Lấy cấu hình active từ database
+    const activeConfig = await mongodbStorage.getActiveConfig();
+    
+    if (!activeConfig || !activeConfig.configName) {
+      console.log('[AUTO-CONNECT] Không có cấu hình active nào. Bỏ qua quá trình tự động kích hoạt.');
+      return;
+    }
+    
+    const configName = activeConfig.configName;
+    console.log(`[AUTO-CONNECT] Tìm thấy cấu hình active: ${configName}, đang kích hoạt...`);
+    
+    // Lấy thông tin cấu hình
+    const config = await mongodbStorage.getOAuthConfig(configName);
+    
+    if (!config) {
+      console.log(`[AUTO-CONNECT] Không tìm thấy thông tin cấu hình ${configName}. Bỏ qua quá trình tự động kích hoạt.`);
+      return;
+    }
+    
+    // Cập nhật cấu hình vào tokenManager
+    await tokenManager.setDynamicConfig(config);
+    
+    // Xác thực token với Hanet API
+    try {
+      // Import bộ xác thực token
+      const tokenValidator = require('./tokenValidator');
       
-      // Làm mới token ngay lập tức
-      try {
-        await tokenManager.getValidHanetToken();
-        console.log(`[AUTO-REFRESH] Đã làm mới token ban đầu thành công`);
-      } catch (refreshError) {
-        console.error(`[AUTO-REFRESH] Lỗi khi làm mới token ban đầu:`, refreshError.message);
+      console.log('[AUTO-CONNECT] Đang xác thực token với Hanet API...');
+      const token = await tokenValidator.getVerifiedToken({ forceRefresh: true });
+      
+      if (token) {
+        console.log(`[AUTO-CONNECT] Tự động kích hoạt thành công! Token hợp lệ cho cấu hình ${configName}`);
       }
-      
-      // Thiết lập interval làm mới token mỗi 12 giờ
-      // 12 giờ = 12 * 60 * 60 * 1000 = 43200000 ms
-      tokenRefreshInterval = setInterval(async () => {
-        const requestId = `auto-refresh-${Date.now()}`;
-        console.log(`[${requestId}] [AUTO-REFRESH] Đang làm mới token tự động...`);
-        
-        try {
-          await tokenManager.getValidHanetToken();
-          console.log(`[${requestId}] [AUTO-REFRESH] Đã làm mới token tự động thành công`);
-        } catch (error) {
-          console.error(`[${requestId}] [AUTO-REFRESH] Lỗi khi làm mới token tự động:`, error.message);
-        }
-      }, 43200000); // 12 giờ
-      
-      console.log(`[AUTO-REFRESH] Đã thiết lập cron job làm mới token mỗi 12 giờ`);
-    } else {
-      console.log(`[AUTO-REFRESH] Không tìm thấy cấu hình active, không thiết lập cron job`);
+    } catch (tokenError) {
+      console.error('[AUTO-CONNECT] Lỗi khi xác thực token:', tokenError.message);
     }
   } catch (error) {
-    console.error(`[AUTO-REFRESH] Lỗi khi thiết lập cron job:`, error.message);
+    console.error('[AUTO-CONNECT] Lỗi khi tự động kích hoạt OAuth:', error.message);
   }
+}
+
+// Thiết lập kiểm tra sức khỏe token định kỳ
+function setupTokenHealthCheck() {
+  // Kiểm tra ngay khi khởi động (sau 10 giây)
+  setTimeout(async () => {
+    try {
+      const tokenValidator = require('./tokenValidator');
+      const isValid = await tokenValidator.isTokenValid();
+      console.log(`[HEALTH-CHECK] Kiểm tra sức khỏe token ban đầu: ${isValid ? 'Hợp lệ' : 'Không hợp lệ'}`);
+      
+      if (!isValid) {
+        console.log('[HEALTH-CHECK] Token không hợp lệ, đang thử làm mới...');
+        await tokenValidator.getVerifiedToken({ forceRefresh: true });
+      }
+    } catch (error) {
+      console.error('[HEALTH-CHECK] Lỗi khi kiểm tra sức khỏe token:', error.message);
+    }
+  }, 10000); // Chờ 10 giây sau khi khởi động
+  
+  // Thiết lập kiểm tra định kỳ (30 phút)
+  setInterval(async () => {
+    try {
+      const tokenValidator = require('./tokenValidator');
+      const isValid = await tokenValidator.isTokenValid();
+      console.log(`[HEALTH-CHECK] Kiểm tra sức khỏe token định kỳ: ${isValid ? 'Hợp lệ' : 'Không hợp lệ'}`);
+      
+      if (!isValid) {
+        console.log('[HEALTH-CHECK] Token không hợp lệ, đang thử làm mới...');
+        await tokenValidator.getVerifiedToken({ forceRefresh: true });
+      }
+    } catch (error) {
+      console.error('[HEALTH-CHECK] Lỗi khi kiểm tra sức khỏe token định kỳ:', error.message);
+    }
+  }, 30 * 60 * 1000); // 30 phút
 }
 
 // Khởi động server
-if (process.env.NODE_ENV !== "production") {
-  app.listen(PORT, () => {
-    console.log(`Server đang chạy trên cổng ${PORT}`);
-    console.log(`Truy cập tại: http://localhost:${PORT}`);
-    
-    // Thiết lập cron job làm mới token
-    setupTokenRefreshCron();
-  });
-} else {
-  // Chỉ xuất module trong môi trường production (Vercel)
-  // Tuy nhiên vẫn thiết lập cron job để duy trì kết nối
-  setupTokenRefreshCron();
-}
+
+app.listen(PORT, async () => {
+  console.log(`[SERVER] Server đang chạy trên port ${PORT}`);
+  console.log(`[SERVER] Truy cập tại: http://localhost:${PORT}`);
+  
+  // Tự động kích hoạt OAuth khi khởi động server
+  await autoActivateOAuth();
+  
+  // Thiết lập kiểm tra token định kỳ
+  setupTokenHealthCheck();
+});
 
 module.exports = app;
