@@ -869,34 +869,46 @@ async function exchangeCodeForToken(code, redirectUri) {
 }
 
 // Hàm chuyển đổi tài khoản sử dụng trong phiên hiện tại
-function useAccount(username) {
-  // Nếu tài khoản chưa tồn tại trong memory, tạo mới
-  if (!accountTokens.has(username)) {
-    // Thử nạp từ file config local trước
-    const config = localConfigStore.loadConfig(username);
-    if (!config) throw new Error('Không tìm thấy cấu hình cho tài khoản này');
+async function useAccount(username) {
+  try {
+    console.log(`[${new Date().toISOString()}] Chuyển đổi sang tài khoản: ${username}`);
+    // Nếu tài khoản chưa tồn tại trong memory, tạo mới
+    if (!accountTokens.has(username)) {
+      console.log(`[${new Date().toISOString()}] Tài khoản ${username} chưa tồn tại, đang tạo mới...`);
+      // Thử nạp từ file config local trước
+      const config = await tokenStorage.loadOAuthConfig(username);
+      if (!config) {
+        console.error(`[${new Date().toISOString()}] Không tìm thấy cấu hình cho tài khoản ${username}`);
+        throw new Error(`Không tìm thấy cấu hình cho tài khoản ${username}`);
+      }
+      
+      // Tạo token data mới
+      const newTokenData = createDefaultTokenData();
+      newTokenData.dynamicConfig = config;
+      newTokenData.refreshToken = config.refreshToken;
+      accountTokens.set(username, newTokenData);
+      console.log(`[${new Date().toISOString()}] Đã tạo dữ liệu mới cho tài khoản ${username}`);
+    }
     
-    // Tạo token data mới
-    const newTokenData = createDefaultTokenData();
-    newTokenData.dynamicConfig = config;
-    newTokenData.refreshToken = config.refreshToken;
-    accountTokens.set(username, newTokenData);
+    // Cập nhật tài khoản hiện tại
+    currentUsername = username;
+    console.log(`[${new Date().toISOString()}] Đã đặt tài khoản hiện tại: ${currentUsername}`);
+    
+    // Lấy token data cho tài khoản mới
+    const tokenData = accountTokens.get(username);
+    
+    // Đảm bảo chúng ta có token mới
+    tokenData.accessToken = null;
+    tokenData.expiresAt = null;
+    
+    // Cập nhật lại vào Map
+    accountTokens.set(username, tokenData);
+    
+    return true;
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Lỗi khi chuyển đổi tài khoản: ${error.message}`);
+    throw error;
   }
-  
-  // Cập nhật tài khoản hiện tại
-  currentUsername = username;
-  
-  // Lấy token data cho tài khoản mới
-  const tokenData = accountTokens.get(username);
-  
-  // Đảm bảo chúng ta có token mới
-  tokenData.accessToken = null;
-  tokenData.expiresAt = null;
-  
-  // Cập nhật lại vào Map
-  accountTokens.set(username, tokenData);
-  
-  return true;
 }
 
 // Hàm lấy danh sách tất cả các tài khoản đã cấu hình
