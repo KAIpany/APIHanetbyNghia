@@ -1232,38 +1232,82 @@ async function setupTokenRefreshCron() {
     clearInterval(tokenRefreshInterval);
   }
   
-  // Lấy cấu hình active
+  // Lấy tất cả cấu hình OAuth
   try {
+    // Trước hết, lấy cấu hình active để đảm bảo nó được cập nhật trước
     const activeConfig = await mongodbStorage.getActiveConfig();
     if (activeConfig && activeConfig.configName) {
-      console.log(`[AUTO-REFRESH] Thiết lập cron job làm mới token tự động cho cấu hình: ${activeConfig.configName}`);
+      console.log(`[AUTO-REFRESH] Tự động cập nhật cấu hình active: ${activeConfig.configName}`);
+      await tokenManager.setDynamicConfig(activeConfig);
       
-      // Làm mới token ngay lập tức
       try {
         await tokenManager.getValidHanetToken();
-        console.log(`[AUTO-REFRESH] Đã làm mới token ban đầu thành công`);
+        console.log(`[AUTO-REFRESH] Đã làm mới token cho cấu hình active thành công`);
       } catch (refreshError) {
-        console.error(`[AUTO-REFRESH] Lỗi khi làm mới token ban đầu:`, refreshError.message);
+        console.error(`[AUTO-REFRESH] Lỗi khi làm mới token cho cấu hình active:`, refreshError.message);
       }
+    }
+    
+    // Lấy danh sách tất cả cấu hình
+    try {
+      const { db } = await mongodbStorage.connectToDatabase();
+      const configCollection = db.collection('oauthConfigs');
+      const allConfigs = await configCollection.find({}).toArray();
       
-      // Thiết lập interval làm mới token mỗi 12 giờ
-      // 12 giờ = 12 * 60 * 60 * 1000 = 43200000 ms
-      tokenRefreshInterval = setInterval(async () => {
-        const requestId = `auto-refresh-${Date.now()}`;
-        console.log(`[${requestId}] [AUTO-REFRESH] Đang làm mới token tự động...`);
+      console.log(`[AUTO-REFRESH] Tìm thấy ${allConfigs.length} cấu hình trong MongoDB`);
+      
+      // Khởi tạo mảng promises để làm mới tất cả token
+      const refreshPromises = allConfigs.map(async (config) => {
+        const configName = config._id;
+        console.log(`[AUTO-REFRESH] Đang cập nhật token cho cấu hình: ${configName}`);
         
         try {
+          // Đặt cấu hình tạm thời
+          await tokenManager.setDynamicConfig(config);
+          
+          // Làm mới token
           await tokenManager.getValidHanetToken();
-          console.log(`[${requestId}] [AUTO-REFRESH] Đã làm mới token tự động thành công`);
+          console.log(`[AUTO-REFRESH] Đã làm mới token cho cấu hình: ${configName} thành công`);
+          return { configName, success: true };
         } catch (error) {
-          console.error(`[${requestId}] [AUTO-REFRESH] Lỗi khi làm mới token tự động:`, error.message);
+          console.error(`[AUTO-REFRESH] Lỗi khi làm mới token cho cấu hình ${configName}:`, error.message);
+          return { configName, success: false, error: error.message };
         }
-      }, 43200000); // 12 giờ
+      });
       
-      console.log(`[AUTO-REFRESH] Đã thiết lập cron job làm mới token mỗi 12 giờ`);
-    } else {
-      console.log(`[AUTO-REFRESH] Không tìm thấy cấu hình active, không thiết lập cron job`);
+      // Chờ tất cả các promises hoàn thành
+      const results = await Promise.allSettled(refreshPromises);
+      
+      // Tổng hợp kết quả
+      const successCount = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
+      const failCount = allConfigs.length - successCount;
+      
+      console.log(`[AUTO-REFRESH] Đã làm mới ${successCount}/${allConfigs.length} cấu hình thành công, ${failCount} thất bại`);
+      
+      // Trả về cấu hình active nếu có
+      if (activeConfig && activeConfig.configName) {
+        await tokenManager.setDynamicConfig(activeConfig);
+        console.log(`[AUTO-REFRESH] Đã trở về cấu hình active: ${activeConfig.configName}`);
+      }
+    } catch (dbError) {
+      console.error(`[AUTO-REFRESH] Lỗi khi truy vấn danh sách cấu hình:`, dbError.message);
     }
+    
+    // Thiết lập interval để làm mới tất cả các token trong MongoDB mỗi 12 giờ
+    // 12 giờ = 12 * 60 * 60 * 1000 = 43200000 ms
+    tokenRefreshInterval = setInterval(async () => {
+      const requestId = `auto-refresh-${Date.now()}`;
+      console.log(`[${requestId}] [AUTO-REFRESH] Đang làm mới tất cả token tự động...`);
+      
+      try {
+        // Thực hiện lại quy trình tương tự như khi khởi động
+        await setupTokenRefreshCron();
+      } catch (error) {
+        console.error(`[${requestId}] [AUTO-REFRESH] Lỗi khi làm mới token tự động:`, error.message);
+      }
+    }, 43200000); // 12 giờ
+    
+    console.log(`[AUTO-REFRESH] Đã thiết lập cron job làm mới tất cả token mỗi 12 giờ`);
   } catch (error) {
     console.error(`[AUTO-REFRESH] Lỗi khi thiết lập cron job:`, error.message);
   }
@@ -1273,6 +1317,15 @@ async function setupTokenRefreshCron() {
 if (process.env.NODE_ENV !== "production") {
   app.listen(PORT, () => {
     console.log(`Server đang chạy tại http://localhost:${PORT}`);
+    
+    // Tự động cập nhật tất cả cấu hình token khi khởi động server
+    setupTokenRefreshCron()
+      .then(() => {
+        console.log("[Đã hoàn thành] Đã khởi tạo tất cả cấu hình OAuth");
+      })
+      .catch(err => {
+        console.error("[Lỗi] Không thể khởi tạo cấu hình OAuth:", err.message);
+      });
     
     // Tự động kết nối với Hanet API khi khởi động server
     console.log('Đang thiết lập kết nối tự động với Hanet API...');
@@ -1299,9 +1352,18 @@ if (process.env.NODE_ENV !== "production") {
     setupTokenRefreshCron();
   });
 } else {
-  // Chỉ xuất module trong môi trường production (Vercel)
-  // Tuy nhiên vẫn thiết lập cron job để duy trì kết nối
-  setupTokenRefreshCron();
+  // Sử dụng ở môi trường Vercel
+  // Tự động cập nhật tất cả cấu hình token trong môi trường serverless
+  (async function() {
+    try {
+      console.log('[Vercel] Đang khởi tạo cấu hình OAuth trên Vercel...');
+      await setupTokenRefreshCron();
+      console.log('[Vercel] Đã hoàn thành khởi tạo cấu hình OAuth trên Vercel');
+    } catch (err) {
+      console.error('[Vercel] Lỗi khởi tạo cấu hình OAuth:', err.message);
+    }
+  })();
 }
 
+// Export app cho cả môi trường development và production
 module.exports = app;
