@@ -8,6 +8,7 @@ const cors = require("cors");
 const tokenManager = require("./tokenManager");
 const crypto = require('crypto');
 const mongodbStorage = require('./mongodbStorage');
+const autoConnector = require('./autoConnector'); // Module tự động kết nối
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -1271,7 +1272,27 @@ async function setupTokenRefreshCron() {
 // Khởi động server
 if (process.env.NODE_ENV !== "production") {
   app.listen(PORT, () => {
-    console.log(`Server đang chạy trên cổng ${PORT}`);
+    console.log(`Server đang chạy tại http://localhost:${PORT}`);
+    
+    // Tự động kết nối với Hanet API khi khởi động server
+    console.log('Đang thiết lập kết nối tự động với Hanet API...');
+    
+    // Khởi động kết nối tự động sau khi server đã chạy
+    setTimeout(async () => {
+      try {
+        // Khởi tạo kết nối tự động
+        const connected = await autoConnector.initialize();
+        
+        if (connected) {
+          console.log('✅ Đã kết nối tự động thành công với Hanet API');
+        } else {
+          console.log('⚠️ Không thể kết nối tự động với Hanet API, sẽ thử lại sau');
+        }
+      } catch (error) {
+        console.error('❌ Lỗi khi thiết lập kết nối tự động:', error.message);
+      }
+    }, 2000); // Chờ 2 giây sau khi server khởi động
+    
     console.log(`Truy cập tại: http://localhost:${PORT}`);
     
     // Thiết lập cron job làm mới token
