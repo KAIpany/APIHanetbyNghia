@@ -396,8 +396,14 @@ app.post("/api/oauth/config", async (req, res) => {
     await mongodbStorage.saveOAuthConfig(configKey, config);
     console.log(`[${new Date().toISOString()}] Đã lưu cấu hình ${configKey} vào MongoDB với ${config.placeIds.length} placeId`);
     
+    // Đặt làm cấu hình active
+    await mongodbStorage.setActiveConfig(configKey);
+    console.log(`[${new Date().toISOString()}] Đã đặt ${configKey} làm cấu hình đang hoạt động`);
+    
     // Cập nhật cấu hình hiện tại
     tokenManager.setDynamicConfig(config);
+    // Cập nhật username hiện tại
+    tokenManager.useAccount(configKey);
     
     return res.status(200).json({
       success: true,
@@ -461,6 +467,72 @@ app.get("/api/oauth/config/:name", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Lỗi khi lấy cấu hình: " + error.message
+    });
+  }
+});
+
+// API kích hoạt cấu hình OAuth
+app.post("/api/oauth/activate/:name", async (req, res) => {
+  const requestId = req.id;
+  const configName = req.params.name;
+  
+  console.log(`[${requestId}] Yêu cầu kích hoạt cấu hình: ${configName}`);
+  
+  try {
+    // Tìm cấu hình trong MongoDB
+    const config = await mongodbStorage.getOAuthConfig(configName);
+    
+    if (!config) {
+      return res.status(404).json({
+        success: false,
+        message: `Không tìm thấy cấu hình: ${configName}`
+      });
+    }
+    
+    console.log(`[${requestId}] Đã tìm thấy cấu hình ${configName}, đang kích hoạt...`);
+    
+    // Đặt làm cấu hình active trong MongoDB
+    await mongodbStorage.setActiveConfig(configName);
+    
+    // Cập nhật cấu hình hiện tại trong tokenManager
+    await tokenManager.setDynamicConfig(config);
+    
+    // Đặt tài khoản hiện tại
+    tokenManager.useAccount(configName);
+    
+    console.log(`[${requestId}] Đã kích hoạt cấu hình ${configName} thành công`);
+    
+    // Kiểm tra và làm mới token ngay lập tức
+    try {
+      console.log(`[${requestId}] Đang thử làm mới token với cấu hình ${configName}...`);
+      const token = await tokenManager.getValidHanetToken();
+      
+      return res.status(200).json({
+        success: true,
+        message: `Đã kích hoạt cấu hình: ${configName}`,
+        auth: {
+          status: "authenticated",
+          message: "Đã xác thực thành công"
+        }
+      });
+    } catch (tokenError) {
+      console.error(`[${requestId}] Lỗi khi làm mới token:`, tokenError.message);
+      
+      // Vẫn trả về thành công nhưng với thông báo lỗi token
+      return res.status(200).json({
+        success: true,
+        message: `Đã kích hoạt cấu hình: ${configName}`,
+        auth: {
+          status: "error",
+          message: `Lỗi xác thực: ${tokenError.message}`
+        }
+      });
+    }
+  } catch (error) {
+    console.error(`[${requestId}] Lỗi khi kích hoạt cấu hình ${configName}:`, error);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi khi kích hoạt cấu hình: " + error.message
     });
   }
 });
@@ -571,24 +643,62 @@ app.get("/api/oauth/callback", async (req, res) => {
 
 // API kiểm tra trạng thái xác thực
 app.get("/api/oauth/status", async (req, res) => {
+  const requestId = req.id;
+  console.log(`[${requestId}] Kiểm tra trạng thái xác thực OAuth`);
+  
   try {
-    const config = tokenManager.getCurrentConfig();
+    // Trước tiên, tải cấu hình mới nhất từ MongoDB nếu có
+    let freshConfig = null;
+    let configName = null;
+    
+    try {
+      // Thử lấy tên cấu hình đang hoạt động từ server hoặc database
+      const activeConfigData = await mongodbStorage.getActiveConfig();
+      if (activeConfigData && activeConfigData.name) {
+        configName = activeConfigData.name;
+        console.log(`[${requestId}] Tìm thấy cấu hình đang hoạt động: ${configName}`);
+        
+        // Tải cấu hình từ MongoDB
+        const storedConfig = await mongodbStorage.getConfig(configName);
+        if (storedConfig && storedConfig.clientId && storedConfig.clientSecret) {
+          console.log(`[${requestId}] Đã tải cấu hình ${configName} từ MongoDB`);
+          freshConfig = storedConfig;
+          
+          // Cập nhật cấu hình trong tokenManager
+          await tokenManager.setDynamicConfig(freshConfig);
+        }
+      }
+    } catch (dbError) {
+      console.error(`[${requestId}] Lỗi khi tải cấu hình từ MongoDB:`, dbError.message);
+    }
+    
+    // Nếu không tìm thấy cấu hình mới, sử dụng cấu hình hiện tại
+    const config = freshConfig || tokenManager.getCurrentConfig();
     let status = "unconfigured";
     let message = "Chưa cấu hình OAuth";
+    let tokenInfo = null;
     
     if (config.clientId && config.clientSecret) {
       status = "configured";
       message = "Đã cấu hình OAuth";
       
       try {
+        console.log(`[${requestId}] Đang thử làm mới token với cấu hình ${configName || 'hiện tại'}`);
         const token = await tokenManager.getValidHanetToken();
         if (token) {
           status = "authenticated";
           message = "Đã xác thực thành công";
+          
+          // Thêm thông tin về token để client có thể xử lý tốt hơn
+          tokenInfo = {
+            accessToken: token.substring(0, 10) + '...',  // Chỉ hiển thị 10 ký tự đầu
+            configName: configName || 'default'
+          };
         }
       } catch (tokenError) {
         status = "error";
         message = "Lỗi xác thực: " + tokenError.message;
+        console.error(`[${requestId}] Lỗi khi làm mới token:`, tokenError.message);
       }
     }
     
@@ -597,6 +707,8 @@ app.get("/api/oauth/status", async (req, res) => {
       data: {
         status,
         message,
+        configName,
+        tokenInfo
       },
     });
   } catch (error) {

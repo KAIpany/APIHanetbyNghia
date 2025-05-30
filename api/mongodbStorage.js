@@ -153,6 +153,60 @@ async function getConfigNames() {
   }
 }
 
+// Lấy cấu hình đang kích hoạt
+async function getActiveConfig() {
+  try {
+    const { db } = await connectToDatabase();
+    const settingCollection = db.collection('settings');
+    
+    // Lấy thông tin cấu hình đang hoạt động
+    const activeConfig = await settingCollection.findOne({ _id: 'activeConfig' });
+    
+    if (activeConfig) {
+      console.log(`[${new Date().toISOString()}] Đã đọc cấu hình đang kích hoạt từ MongoDB: ${activeConfig.name}`);
+      return activeConfig;
+    } else {
+      console.log(`[${new Date().toISOString()}] Không tìm thấy cấu hình đang kích hoạt trong MongoDB`);
+      return null;
+    }
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Lỗi khi đọc cấu hình đang kích hoạt từ MongoDB:`, error.message);
+    return null;
+  }
+}
+
+// Đọc cấu hình theo tên
+async function getConfig(configName) {
+  // Đây là alias cho getOAuthConfig để giữ tính nhất quán API
+  return await getOAuthConfig(configName);
+}
+
+// Lưu cấu hình đang kích hoạt
+async function setActiveConfig(configName) {
+  try {
+    const { db } = await connectToDatabase();
+    const settingCollection = db.collection('settings');
+    
+    // Cập nhật hoặc thêm mới cấu hình đang kích hoạt
+    const result = await settingCollection.updateOne(
+      { _id: 'activeConfig' },
+      { 
+        $set: { 
+          name: configName,
+          updatedAt: new Date()
+        }
+      },
+      { upsert: true } // Tạo mới nếu không tồn tại
+    );
+    
+    console.log(`[${new Date().toISOString()}] Đã lưu cấu hình đang kích hoạt vào MongoDB: ${configName}`);
+    return true;
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Lỗi khi lưu cấu hình đang kích hoạt vào MongoDB:`, error.message);
+    return false;
+  }
+}
+
 // Đóng kết nối khi ứng dụng kết thúc
 function closeConnection() {
   if (cachedClient) {
@@ -177,5 +231,8 @@ module.exports = {
   saveOAuthConfig,
   getOAuthConfig,
   getConfigNames,
+  getActiveConfig,
+  getConfig,
+  setActiveConfig,
   closeConnection
-}; 
+};
