@@ -505,7 +505,7 @@ app.post("/api/oauth/activate/:name", async (req, res) => {
     if (!config) {
       return res.status(404).json({
         success: false,
-        message: `Không tìm thấy cấu hình: ${configName}`
+        message: `Không tìm thấy cấu hìnhh: ${configName}`
       });
     }
     
