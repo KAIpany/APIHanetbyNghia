@@ -407,7 +407,7 @@ async function getValidHanetToken(forceRefresh = false, username = null) {
       }, 60000); // Reset sau 1 phút
       
       // Ném lỗi với thông tin chi tiết
-      throw new Error(`Đã vượt quá số lần thử lại tối đa (${MAX_REFRESH_RETRIES}). Lỗi cuối: ${cachedTokenData.lastRefreshError || 'Không rõ'}`);
+      throw new Error(`Đã vượt quá số lần thử lại tối đa (${MAX_REFRESH_RETRIES}). Lỗi cuối: ${tokenData.lastRefreshError || 'Không rõ'}`);
     }
     
     // Đảm bảo lấy cấu hình mới nhất từ storage
@@ -419,10 +419,10 @@ async function getValidHanetToken(forceRefresh = false, username = null) {
     console.log(`[${requestId}] DEBUG: Tài khoản hiện tại: ${currentUsername || 'Chưa được xác định'}`);
     
     // Luôn đọn Tokens mới nhất từ storage để đảm bảo dùng dữ liệu đồng bộ
-    const storedTokens = await tokenStorage.loadTokens();
+    const storedTokens = await tokenStorage.loadTokens(accountName);
     if (storedTokens && storedTokens.refreshToken) {
-      console.log(`[${requestId}] DEBUG: Đã tìm thấy refresh token trong storage`);
-      cachedTokenData.refreshToken = storedTokens.refreshToken;
+      console.log(`[${requestId}] DEBUG: Đã tìm thấy refresh token trong storage cho tài khoản ${accountName}`);
+      tokenData.refreshToken = storedTokens.refreshToken;
     }
     
     // Cấu hình cụ thể cho tài khoản hiện tại
@@ -471,7 +471,7 @@ async function getValidHanetToken(forceRefresh = false, username = null) {
     }
 
     // Đảm bảo refreshToken có giá trị đúng nhất từ nhiều nguồn
-    const refreshToken = cachedTokenData.refreshToken || config.refreshToken || storedTokens?.refreshToken;
+    const refreshToken = tokenData.refreshToken || config.refreshToken || storedTokens?.refreshToken;
     
     if (!refreshToken) {
       throw new Error("Không có refresh token để làm mới access token");
@@ -630,20 +630,22 @@ async function getValidHanetToken(forceRefresh = false, username = null) {
     // Cập nhật refresh token nếu được cấp mới
     if (response.data.refresh_token) {
       try {
-        cachedTokenData.refreshToken = response.data.refresh_token;
-        cachedTokenData.lastSync = Date.now();
+        tokenData.refreshToken = response.data.refresh_token;
+        tokenData.lastSync = Date.now();
         
-        // Lưu vào process.env
-        process.env.HANET_REFRESH_TOKEN = response.data.refresh_token;
+        // Lưu vào process.env nếu là tài khoản mặc định
+        if (accountName === 'default') {
+          process.env.HANET_REFRESH_TOKEN = response.data.refresh_token;
+        }
         
         // Lưu vào storage cho lưu trữ liên tục
         await tokenStorage.saveTokens({
           refreshToken: response.data.refresh_token,
-          accessToken: cachedTokenData.accessToken,
-          expiresAt: cachedTokenData.expiresAt,
-          lastSync: cachedTokenData.lastSync,
+          accessToken: tokenData.accessToken,
+          expiresAt: tokenData.expiresAt,
+          lastSync: tokenData.lastSync,
           state: TOKEN_STATE.VALID
-        });
+        }, accountName);
         
         // Cập nhật cấu hình động nếu có
         if (dynamicConfig) {
@@ -673,21 +675,21 @@ async function getValidHanetToken(forceRefresh = false, username = null) {
       }
     } else {
       // Vẫn cập nhật thời gian đồng bộ và lưu lại trạng thái token
-      cachedTokenData.lastSync = Date.now();
+      tokenData.lastSync = Date.now();
       await tokenStorage.saveTokens({
-        refreshToken: cachedTokenData.refreshToken,
-        accessToken: cachedTokenData.accessToken,
-        expiresAt: cachedTokenData.expiresAt,
-        lastSync: cachedTokenData.lastSync,
+        refreshToken: tokenData.refreshToken,
+        accessToken: tokenData.accessToken,
+        expiresAt: tokenData.expiresAt,
+        lastSync: tokenData.lastSync,
         state: TOKEN_STATE.VALID
-      });
+      }, accountName);
     }
     
-    return cachedTokenData.accessToken;
+    return tokenData.accessToken;
   } else {
-    cachedTokenData.state = TOKEN_STATE.FAILED;
+    tokenData.state = TOKEN_STATE.FAILED;
     const errorMsg = "Phản hồi không chứa access token hợp lệ";
-    cachedTokenData.lastRefreshError = errorMsg;
+    tokenData.lastRefreshError = errorMsg;
     throw new Error(errorMsg);
   }
 } catch (error) {
@@ -816,18 +818,23 @@ async function exchangeCodeForToken(code, redirectUri) {
     if (response.data && response.data.access_token) {
       console.log(`[${new Date().toISOString()}] Trao đổi code lấy token thành công.`);
       
+      // Lấy token data cho tài khoản hiện tại
+      const tokenData = accountTokens.get(currentUsername);
+      
       // Cập nhật token trong cache
-      cachedTokenData.accessToken = response.data.access_token;
-      cachedTokenData.expiresAt = Date.now() + (response.data.expires_in * 1000 * 0.9);
+      tokenData.accessToken = response.data.access_token;
+      tokenData.expiresAt = Date.now() + (response.data.expires_in * 1000 * 0.9);
       
       if (response.data.refresh_token) {
         try {
           console.log(`[${new Date().toISOString()}] Đã nhận được refresh token mới.`);
-          cachedTokenData.refreshToken = response.data.refresh_token;
-          cachedTokenData.lastSync = Date.now();
+          tokenData.refreshToken = response.data.refresh_token;
+          tokenData.lastSync = Date.now();
           
-          // Lưu vào process.env
-          process.env.HANET_REFRESH_TOKEN = response.data.refresh_token;
+          // Lưu vào process.env nếu là tài khoản mặc định
+          if (currentUsername === 'default') {
+            process.env.HANET_REFRESH_TOKEN = response.data.refresh_token;
+          }
           
           // Lưu vào storage cho lưu trữ liên tục
           await tokenStorage.saveTokens({
@@ -835,8 +842,8 @@ async function exchangeCodeForToken(code, redirectUri) {
             accessToken: response.data.access_token,
             expiresIn: response.data.expires_in,
             expiresAt: Date.now() + (response.data.expires_in * 1000),
-            lastSync: cachedTokenData.lastSync
-          });
+            lastSync: tokenData.lastSync
+          }, currentUsername);
           
           // Cập nhật cấu hình động nếu có
           if (dynamicConfig) {
