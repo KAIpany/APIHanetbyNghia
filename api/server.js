@@ -1219,7 +1219,7 @@ app.use((err, req, res, next) => {
 
   res.status(500).json({
     success: false,
-    message: 'Lỗi máy chủ nội bộ. ' + (process.env.NODE_ENV === 'development' ? err.message : '')
+    message: 'Lỗi máy chủ nội bộ.. ' + (process.env.NODE_ENV === 'development' ? err.message : '')
   });
 });
 
