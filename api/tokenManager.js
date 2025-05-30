@@ -219,7 +219,7 @@ async function getValidHanetToken(forceRefresh = false) {
   
   // Thiết lập interval kiểm tra sức khỏe token nếu chưa có
   if (!cachedTokenData.healthCheckInterval) {
-    console.log(`[${requestId}] Thiết lập interval kiểm tra sức khỏe token mới ${TOKEN_MONITOR_INTERVAL/60000} phút`);
+    console.log(`[${requestId}] Thiếtt lập interval kiểm tra sức khỏe token mới ${TOKEN_MONITOR_INTERVAL/60000} phút`);
     cachedTokenData.healthCheckInterval = setInterval(async () => {
       try {
         // Tự động đồng bộ và làm mới token trước khi hết hạn
