@@ -217,26 +217,51 @@ async function getValidHanetToken() {
   try {
     // Đảm bảo lấy cấu hình mới nhất từ storage
     // Nếu tài khoản hiện tại được xác định, hãy tải cấu hình cụ thể
-    let config;
+    let config = null;
+    
+    // Ghi log cho debug
+    console.log(`[${new Date().toISOString()}] DEBUG: Bắt đầu làm mới token...`);
+    console.log(`[${new Date().toISOString()}] DEBUG: Tài khoản hiện tại: ${currentUsername || 'Chưa được xác định'}`);
+    
+    // Luôn đọn Tokens mới nhất từ storage để đảm bảo dùng dữ liệu đồng bộ
+    const storedTokens = await tokenStorage.loadTokens();
+    if (storedTokens && storedTokens.refreshToken) {
+      console.log(`[${new Date().toISOString()}] DEBUG: Đã tìm thấy refresh token trong storage`);
+      cachedTokenData.refreshToken = storedTokens.refreshToken;
+    }
+    
+    // Cấu hình cụ thể cho tài khoản hiện tại
     if (currentUsername) {
       try {
-        // Tải cấu hình từ file nếu ở môi trường development
-        if (process.env.NODE_ENV !== 'production') {
-          const fileConfig = localConfigStore.loadConfig(currentUsername);
-          if (fileConfig && fileConfig.refreshToken) {
-            console.log(`[${new Date().toISOString()}] Tải cấu hình cho user ${currentUsername} từ file thành công`);
-            dynamicConfig = fileConfig;
-            config = fileConfig;
+        // Tải cấu hình từ MongoDB trước
+        const storedConfig = await tokenStorage.loadOAuthConfig(currentUsername);
+        if (storedConfig && storedConfig.clientId && storedConfig.clientSecret) {
+          console.log(`[${new Date().toISOString()}] DEBUG: Tải cấu hình cho user ${currentUsername} từ MongoDB thành công`);
+          config = storedConfig;
+          
+          // Cập nhật dynamicConfig
+          dynamicConfig = { ...storedConfig };
+          
+          // Đảm bảo có refreshToken
+          if (storedTokens && storedTokens.refreshToken) {
+            config.refreshToken = storedTokens.refreshToken;
+            dynamicConfig.refreshToken = storedTokens.refreshToken;
           }
         }
-
-        // Nếu không lấy được từ file hoặc không phải môi trường development, lấy từ MongoDB
-        if (!config) {
-          const storedConfig = await tokenStorage.getOAuthConfig(currentUsername);
-          if (storedConfig) {
-            console.log(`[${new Date().toISOString()}] Tải cấu hình cho user ${currentUsername} từ MongoDB thành công`);
-            dynamicConfig = storedConfig;
-            config = storedConfig;
+        
+        // Nếu ở môi trường development, thử tải từ file
+        if (!config && process.env.NODE_ENV !== 'production') {
+          const fileConfig = localConfigStore.loadConfig(currentUsername);
+          if (fileConfig && fileConfig.clientId && fileConfig.clientSecret) {
+            console.log(`[${new Date().toISOString()}] DEBUG: Tải cấu hình cho user ${currentUsername} từ file thành công`);
+            config = fileConfig;
+            dynamicConfig = { ...fileConfig };
+            
+            // Đảm bảo có refreshToken
+            if (storedTokens && storedTokens.refreshToken) {
+              config.refreshToken = storedTokens.refreshToken;
+              dynamicConfig.refreshToken = storedTokens.refreshToken;
+            }
           }
         }
       } catch (configError) {
@@ -246,10 +271,12 @@ async function getValidHanetToken() {
 
     // Nếu không lấy được cấu hình cụ thể, sử dụng cấu hình hiện tại
     if (!config) {
+      console.log(`[${new Date().toISOString()}] DEBUG: Sử dụng cấu hình mặc định từ getCurrentConfig()`);
       config = getCurrentConfig();
     }
 
-    const refreshToken = cachedTokenData.refreshToken || config.refreshToken;
+    // Đảm bảo refreshToken có giá trị đúng nhất từ nhiều nguồn
+    const refreshToken = cachedTokenData.refreshToken || config.refreshToken || storedTokens?.refreshToken;
     
     if (!refreshToken) {
       throw new Error("Không có refresh token để làm mới access token");
@@ -259,16 +286,22 @@ async function getValidHanetToken() {
       throw new Error("Thiếu thông tin Client ID hoặc Client Secret");
     }
 
-    // Log thông tin debug (xóa trong production)
-    console.log(`[${new Date().toISOString()}] Token refresh info:`, {
+    // Log thông tin chi tiết để debug
+    console.log(`[${new Date().toISOString()}] DEBUG - Token refresh info:`, {
       tokenUrl: config.tokenUrl,
       clientIdLength: config.clientId ? config.clientId.length : 0,
+      clientId: config.clientId ? config.clientId.substring(0, 5) + '...' : null,
       refreshTokenLength: refreshToken ? refreshToken.length : 0,
-      currentUsername: currentUsername
+      refreshTokenPrefix: refreshToken ? refreshToken.substring(0, 5) + '...' : null,
+      currentUsername: currentUsername,
+      appName: config.appName || 'Không xác định',
+      source: config === dynamicConfig ? 'dynamicConfig' : 'loadedFromStorage'
     });
 
-    // Sử dụng tokenUrl thay vì tạo URL từ baseUrl
+    // Sử dụng tokenUrl theo đúng định dạng Hanet API yêu cầu
     const url = config.tokenUrl || "https://oauth.hanet.com/token";
+    
+    // Tạo data theo đúng định dạng form-urlencoded mà Hanet API yêu cầu
     const data = {
       grant_type: "refresh_token",
       refresh_token: refreshToken,
@@ -276,14 +309,18 @@ async function getValidHanetToken() {
       client_secret: config.clientSecret,
     };
 
-    console.log(`[${new Date().toISOString()}] Đang làm mới Access Token...`);
+    console.log(`[${new Date().toISOString()}] Đang gọi API làm mới Access Token tại: ${url}`);
     
+    // Sử dụng axios với cấu hình đầy đủ
     const response = await axios({
       method: "post",
       url: url,
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: { 
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json"
+      },
       data: qs.stringify(data),
-      timeout: 10000,
+      timeout: 15000, // Tăng timeout để tránh lỗi mạng
     });
 
     if (response.data && response.data.access_token) {
@@ -342,27 +379,77 @@ async function getValidHanetToken() {
       throw new Error("Phản hồi không chứa access token hợp lệ");
     }
   } catch (error) {
+    // Xử lý chi tiết lỗi
+    const errorDetail = {
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      error_description: error.response?.data?.error_description,
+      error_type: error.response?.data?.error,
+      message: error.message
+    };
+    
     const errorMessage = error.response?.data?.error_description || error.message;
     console.error(`[${new Date().toISOString()}] Lỗi khi làm mới token: ${errorMessage}`);
-    console.error(`[${new Date().toISOString()}] Response data:`, error.response?.data);
+    console.error(`[${new Date().toISOString()}] Chi tiết lỗi:`, JSON.stringify(errorDetail, null, 2));
     
     // Reset token để tránh dùng token lỗi
     cachedTokenData.accessToken = null;
     cachedTokenData.expiresAt = null;
     
-    // Nếu lỗi là do token hết hạn, hãy xóa refresh token để buộc đăng nhập lại
-    if (error.response?.status === 400 && 
-        (errorMessage.includes('invalid_grant') || 
-         errorMessage.includes('invalid refresh token') || 
-         errorMessage.includes('expired'))) {
-      console.log(`[${new Date().toISOString()}] Refresh token không hợp lệ hoặc hết hạn, xóa khỏi bộ nhớ`);
-      cachedTokenData.refreshToken = null;
+    // Xử lý các trường hợp lỗi cụ thể
+    // Trường hợp 1: Lỗi 400 - Có thể do refresh token không hợp lệ hoặc hết hạn
+    if (error.response?.status === 400) {
+      const errorType = error.response?.data?.error;
+      console.log(`[${new Date().toISOString()}] DEBUG: Lỗi 400 với loại lỗi: ${errorType}`);
       
-      // Báo hiệu client rằng cần đăng nhập lại
-      throw new Error(`Token đã hết hạn hoặc bị thu hồi. Vui lòng đăng nhập lại: ${errorMessage}`);
+      // Kiểm tra các loại lỗi đặc biệt của OAuth
+      if (errorType === 'invalid_grant' || 
+          errorType === 'invalid_request' ||
+          errorMessage.includes('invalid_grant') ||
+          errorMessage.includes('invalid refresh token') ||
+          errorMessage.includes('expired') ||
+          errorMessage.includes('revoked')) {
+        
+        console.log(`[${new Date().toISOString()}] Refresh token không hợp lệ hoặc hết hạn, xóa khỏi bộ nhớ`);
+        
+        // Xóa refresh token khỏi các nơi lưu trữ
+        cachedTokenData.refreshToken = null;
+        
+        // Xóa khỏi MongoDB để đảm bảo đồng bộ
+        try {
+          tokenStorage.saveTokens({
+            refreshToken: null,
+            accessToken: null,
+            expiresAt: null,
+            lastSync: Date.now()
+          });
+        } catch (storageError) {
+          console.error(`[${new Date().toISOString()}] Lỗi khi xóa token khỏi storage:`, storageError.message);
+        }
+        
+        // Báo hiệu client rằng cần đăng nhập lại
+        throw new Error(`Token đã hết hạn hoặc bị thu hồi. Vui lòng đăng nhập lại. Lỗi: ${errorType || errorMessage}`);
+      }
+      
+      // Trường hợp lỗi client_id hoặc client_secret
+      if (errorType === 'invalid_client' ||
+          errorMessage.includes('client_id') ||
+          errorMessage.includes('client_secret') ||
+          errorMessage.includes('client credentials')) {
+        console.log(`[${new Date().toISOString()}] Thông tin client không hợp lệ. Yêu cầu cấu hình lại.`);
+        throw new Error(`Thông tin client không hợp lệ. Vui lòng kiểm tra Client ID và Client Secret. Lỗi: ${errorType || errorMessage}`);
+      }
     }
     
-    throw new Error(`Không thể làm mới token: ${errorMessage}`);
+    // Trường hợp 2: Lỗi mạng hoặc lỗi server (5xx)
+    if (!error.response || error.response.status >= 500) {
+      console.log(`[${new Date().toISOString()}] Lỗi kết nối hoặc lỗi server: ${errorMessage}`);
+      throw new Error(`Lỗi kết nối đến máy chủ Hanet. Vui lòng kiểm tra kết nối mạng và thử lại sau: ${errorMessage}`);
+    }
+    
+    // Trường hợp lỗi khác
+    throw new Error(`Không thể làm mới token (mã lỗi ${error.response?.status || 'không xác định'}): ${errorMessage}`);
   }
 }
 
