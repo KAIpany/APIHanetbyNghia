@@ -1,5 +1,6 @@
 {
   "version": 2,
+  "name": "hanet-client",
   "builds": [
     {
       "src": "package.json",
@@ -33,6 +34,6 @@
     }
   ],
   "env": {
-    "REACT_APP_API_URL": "https://api-hanet1.vercel.app"
+    "REACT_APP_API_URL": "https://api-hanetby-nghia.vercel.app"
   }
 }

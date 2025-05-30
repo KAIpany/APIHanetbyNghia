@@ -1,15 +1,19 @@
 {
   "version": 2,
+  "name": "hanet-api",
   "builds": [
     {
       "src": "server.js",
-      "use": "@vercel/node"
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": ["*.js"]
+      }
     }
   ],
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "/server.js",
+      "dest": "server.js",
       "headers": {
         "Access-Control-Allow-Credentials": "true",
         "Access-Control-Allow-Origin": "*",
@@ -19,6 +23,7 @@
     }
   ],
   "env": {
-    "NODE_ENV": "production"
+    "NODE_ENV": "production",
+    "VERCEL": "1"
   }
 }
