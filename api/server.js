@@ -496,7 +496,7 @@ app.post("/api/oauth/activate/:name", async (req, res) => {
   };
   
   try {
-    // Tìm cấu hình trong MongoDB với timeout
+    // Tìm cấuu hình trong MongoDB với timeout
     let config;
     try {
       config = await timeoutPromise(mongodbStorage.getOAuthConfig(configName), 3000);
