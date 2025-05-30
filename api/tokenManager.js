@@ -14,12 +14,31 @@ const DEFAULT_TOKENS = {
   clientSecret: "YOUR_CLIENT_SECRET_HERE" // Thay thế bằng client secret của bạn
 };
 
+// Biến để kiểm soát thử lại và trạng thái token
+const TOKEN_STATE = {
+  VALID: 'valid',
+  REFRESHING: 'refreshing', 
+  FAILED: 'failed',
+  UNKNOWN: 'unknown'
+};
+
+// Khoảng thời gian theo dõi token health
+const TOKEN_MONITOR_INTERVAL = 10 * 60 * 1000; // 10 phút
+
+// Số lần thử lại tối đa khi làm mới token
+const MAX_REFRESH_RETRIES = 3;
+
 // Lưu trữ thông tin token hiện tại
 let cachedTokenData = {
   accessToken: null,
   refreshToken: DEFAULT_TOKENS.refreshToken || null,
   expiresAt: null,
-  lastSync: Date.now() // Timestamp cho lần đồng bộ cuối
+  lastSync: Date.now(), // Timestamp cho lần đồng bộ cuối
+  state: TOKEN_STATE.UNKNOWN, // Trạng thái token hiện tại
+  refreshAttempts: 0, // Số lần thử làm mới liên tiếp
+  lastRefreshTime: null, // Lần cuối làm mới token
+  lastRefreshError: null, // Lỗi gặp phải khi làm mới token
+  healthCheckInterval: null // Interval cho việc kiểm tra sức khỏe token
 };
 
 let currentUsername = null; // Tài khoản đang sử dụng
@@ -194,39 +213,100 @@ function getCurrentConfig() {
 }
 
 // Kiểm tra và refresh token khi cần
-async function getValidHanetToken() {
+async function getValidHanetToken(forceRefresh = false) {
   const now = Date.now();
+  const requestId = `token-req-${Date.now().toString(36)}`;
+  
+  // Thiết lập interval kiểm tra sức khỏe token nếu chưa có
+  if (!cachedTokenData.healthCheckInterval) {
+    console.log(`[${requestId}] Thiết lập interval kiểm tra sức khỏe token mới ${TOKEN_MONITOR_INTERVAL/60000} phút`);
+    cachedTokenData.healthCheckInterval = setInterval(async () => {
+      try {
+        // Tự động đồng bộ và làm mới token trước khi hết hạn
+        const tokenStatus = await getValidHanetToken(false);
+        console.log(`[AUTO-HEALTH] Kiểm tra sức khỏe token thành công, trạng thái: ${cachedTokenData.state}`);
+      } catch (err) {
+        console.error(`[AUTO-HEALTH] Lỗi khi tự động kiểm tra sức khỏe token:`, err.message);
+        // Cố gắng làm mới lại
+        try {
+          await getValidHanetToken(true);
+        } catch (refreshErr) {
+          console.error(`[AUTO-HEALTH] Không thể làm mới token:`, refreshErr.message);
+        }
+      }
+    }, TOKEN_MONITOR_INTERVAL);
+  }
   
   // Kiểm tra xem đã quá lâu chưa sync lại (5 phút)
   if (now - cachedTokenData.lastSync > 5 * 60 * 1000) {
-    console.log(`[${new Date().toISOString()}] Đã quá 5 phút kể từ lần đồng bộ token cuối, đang kiểm tra lưu trữ...`);
+    console.log(`[${requestId}] Đã quá 5 phút kể từ lần đồng bộ token cuối, đang kiểm tra lưu trữ...`);
     
     try {
       // Khởi tạo lại từ storage
       await initializeTokens();
+      // Cập nhật trạng thái
+      cachedTokenData.state = TOKEN_STATE.VALID;
     } catch (error) {
-      console.error(`[${new Date().toISOString()}] Lỗi khi đồng bộ token:`, error.message);
+      console.error(`[${requestId}] Lỗi khi đồng bộ token:`, error.message);
+      // Không đổi trạng thái vì có thể vẫn sử dụng được token hiện tại
     }
   }
   
-  // Nếu token còn hạn thì dùng tiếp
-  if (cachedTokenData.accessToken && cachedTokenData.expiresAt && now < cachedTokenData.expiresAt) {
+  // Nếu token còn hạn và không bị buộc làm mới
+  if (!forceRefresh && cachedTokenData.accessToken && cachedTokenData.expiresAt && now < cachedTokenData.expiresAt) {
+    // Cập nhật trạng thái token
+    cachedTokenData.state = TOKEN_STATE.VALID;
+    
+    // Nếu đã có lỗi trước đó và giờ đã dùng được, reset lại số lần thử
+    if (cachedTokenData.refreshAttempts > 0) {
+      cachedTokenData.refreshAttempts = 0;
+      cachedTokenData.lastRefreshError = null;
+    }
+    
     return cachedTokenData.accessToken;
+  }
+  
+  // Kiểm tra xem có đang trong quá trình làm mới không để tránh gọi API đồng thời
+  if (cachedTokenData.state === TOKEN_STATE.REFRESHING) {
+    console.log(`[${requestId}] Token đang được làm mới, đợi kết quả...`);
+    // Đợi 2 giây và thử lại
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    return getValidHanetToken(forceRefresh);
   }
 
   try {
+    // Đánh dấu token đang được làm mới
+    cachedTokenData.state = TOKEN_STATE.REFRESHING;
+    cachedTokenData.lastRefreshTime = Date.now();
+    cachedTokenData.refreshAttempts++;
+    
+    // Log thông tin quá trình làm mới
+    console.log(`[${requestId}] Đang làm mới token, lần thử ${cachedTokenData.refreshAttempts}/${MAX_REFRESH_RETRIES}`);
+    
+    // Kiểm tra nếu quá số lần thử tối đa
+    if (cachedTokenData.refreshAttempts > MAX_REFRESH_RETRIES) {
+      // Reset để lần sau có thể thử lại
+      setTimeout(() => {
+        cachedTokenData.refreshAttempts = 0;
+        cachedTokenData.state = TOKEN_STATE.UNKNOWN;
+      }, 60000); // Reset sau 1 phút
+      
+      // Ném lỗi với thông tin chi tiết
+      throw new Error(`Đã vượt quá số lần thử lại tối đa (${MAX_REFRESH_RETRIES}). Lỗi cuối: ${cachedTokenData.lastRefreshError || 'Không rõ'}`);
+    }
+    
     // Đảm bảo lấy cấu hình mới nhất từ storage
     // Nếu tài khoản hiện tại được xác định, hãy tải cấu hình cụ thể
     let config = null;
     
     // Ghi log cho debug
-    console.log(`[${new Date().toISOString()}] DEBUG: Bắt đầu làm mới token...`);
-    console.log(`[${new Date().toISOString()}] DEBUG: Tài khoản hiện tại: ${currentUsername || 'Chưa được xác định'}`);
+    console.log(`[${requestId}] DEBUG: Bắt đầu làm mới token...`);
+    console.log(`[${requestId}] DEBUG: Tài khoản hiện tại: ${currentUsername || 'Chưa được xác định'}`);
     
     // Luôn đọn Tokens mới nhất từ storage để đảm bảo dùng dữ liệu đồng bộ
     const storedTokens = await tokenStorage.loadTokens();
     if (storedTokens && storedTokens.refreshToken) {
-      console.log(`[${new Date().toISOString()}] DEBUG: Đã tìm thấy refresh token trong storage`);
+      console.log(`[${requestId}] DEBUG: Đã tìm thấy refresh token trong storage`);
       cachedTokenData.refreshToken = storedTokens.refreshToken;
     }
     
@@ -311,20 +391,38 @@ async function getValidHanetToken() {
 
     console.log(`[${new Date().toISOString()}] Đang gọi API làm mới Access Token tại: ${url}`);
     
-    // Sử dụng axios với cấu hình đầy đủ
-    const response = await axios({
-      method: "post",
-      url: url,
-      headers: { 
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept": "application/json"
-      },
-      data: qs.stringify(data),
-      timeout: 15000, // Tăng timeout để tránh lỗi mạng
-    });
+    // Sử dụng axios với cấu hình đầy đủ và retry logic
+    let response;
+    try {
+      response = await axios({
+        method: "post",
+        url: url,
+        headers: { 
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Accept": "application/json"
+        },
+        data: qs.stringify(data),
+        timeout: 15000, // Tăng timeout để tránh lỗi mạng
+      });
+    } catch (axiosError) {
+      // Nếu là lỗi mạng và còn lần thử, thử lại sau 2 giây
+      if ((axiosError.code === 'ECONNABORTED' || axiosError.message.includes('timeout') || 
+          axiosError.code === 'ENOTFOUND' || axiosError.message.includes('Network Error')) && 
+          cachedTokenData.refreshAttempts < MAX_REFRESH_RETRIES) {
+        console.log(`[${requestId}] Lỗi kết nối khi làm mới token, thử lại sau 2 giây...`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        return getValidHanetToken(true);
+      }
+      throw axiosError;
+    }
 
     if (response.data && response.data.access_token) {
-      console.log(`[${new Date().toISOString()}] Làm mới Access Token thành công.`);
+      console.log(`[${requestId}] Làm mới Access Token thành công.`);
+      
+      // Cập nhật trạng thái token và reset số lần thử
+      cachedTokenData.state = TOKEN_STATE.VALID;
+      cachedTokenData.refreshAttempts = 0;
+      cachedTokenData.lastRefreshError = null;
       
       // Cập nhật token trong cache
       cachedTokenData.accessToken = response.data.access_token;
@@ -344,7 +442,8 @@ async function getValidHanetToken() {
             refreshToken: response.data.refresh_token,
             accessToken: cachedTokenData.accessToken,
             expiresAt: cachedTokenData.expiresAt,
-            lastSync: cachedTokenData.lastSync
+            lastSync: cachedTokenData.lastSync,
+            state: TOKEN_STATE.VALID
           });
           
           // Cập nhật cấu hình động nếu có
@@ -367,16 +466,30 @@ async function getValidHanetToken() {
             }
             
             // Gửi thông báo tới client để cập nhật refresh token nếu cần
-            console.log(`[${new Date().toISOString()}] Đã nhận refresh token mới và cập nhật cấu hình`);
+            console.log(`[${requestId}] Đã nhận refresh token mới và cập nhật cấu hình`);
           }
         } catch (storageError) {
-          console.error(`[${new Date().toISOString()}] Lỗi khi lưu token mới vào storage:`, storageError.message);
+          console.error(`[${requestId}] Lỗi khi lưu token mới vào storage:`, storageError.message);
+          // Vẫn tiếp tục dùng token mới trong bộ nhớ dù lưu trữ thất bại
         }
+      } else {
+        // Vẫn cập nhật thời gian đồng bộ và lưu lại trạng thái token
+        cachedTokenData.lastSync = Date.now();
+        await tokenStorage.saveTokens({
+          refreshToken: cachedTokenData.refreshToken,
+          accessToken: cachedTokenData.accessToken,
+          expiresAt: cachedTokenData.expiresAt,
+          lastSync: cachedTokenData.lastSync,
+          state: TOKEN_STATE.VALID
+        });
       }
       
       return cachedTokenData.accessToken;
     } else {
-      throw new Error("Phản hồi không chứa access token hợp lệ");
+      cachedTokenData.state = TOKEN_STATE.FAILED;
+      const errorMsg = "Phản hồi không chứa access token hợp lệ";
+      cachedTokenData.lastRefreshError = errorMsg;
+      throw new Error(errorMsg);
     }
   } catch (error) {
     // Xử lý chi tiết lỗi
@@ -389,13 +502,29 @@ async function getValidHanetToken() {
       message: error.message
     };
     
+    // Lưu lỗi vào trạng thái
+    cachedTokenData.state = TOKEN_STATE.FAILED;
+    cachedTokenData.lastRefreshError = error.message;
+    
     const errorMessage = error.response?.data?.error_description || error.message;
-    console.error(`[${new Date().toISOString()}] Lỗi khi làm mới token: ${errorMessage}`);
-    console.error(`[${new Date().toISOString()}] Chi tiết lỗi:`, JSON.stringify(errorDetail, null, 2));
+    console.error(`[${requestId}] Lỗi khi làm mới token: ${errorMessage}`);
+    console.error(`[${requestId}] Chi tiết lỗi:`, JSON.stringify(errorDetail, null, 2));
     
     // Reset token để tránh dùng token lỗi
     cachedTokenData.accessToken = null;
     cachedTokenData.expiresAt = null;
+    
+    // Lập lịch tự động thử lại sau một khoảng thời gian
+    const retryDelay = Math.min(30000 * (cachedTokenData.refreshAttempts || 1), 5 * 60 * 1000); // Tối đa 5 phút
+    console.log(`[${requestId}] Sẽ tự động thử lại sau ${retryDelay/1000} giây`);
+    
+    // Đặt trạng thái về UNKNOWN để lần sau có thể thử lại
+    setTimeout(() => {
+      if (cachedTokenData.state === TOKEN_STATE.FAILED) {
+        console.log(`[AUTO-RECOVERY] Đặt lại trạng thái token về UNKNOWN để thử lại`);
+        cachedTokenData.state = TOKEN_STATE.UNKNOWN;
+      }
+    }, retryDelay);
     
     // Xử lý các trường hợp lỗi cụ thể
     // Trường hợp 1: Lỗi 400 - Có thể do refresh token không hợp lệ hoặc hết hạn
