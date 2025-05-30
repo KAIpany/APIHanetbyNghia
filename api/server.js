@@ -38,8 +38,13 @@ app.use(
     origin: [
       "https://api-hanet.vercel.app",
       "http://localhost:3000",
-      "https://client-hanet-re41.vercel.app"
+      "https://client-hanet-re41.vercel.app",
+      "https://api-fe-hanetby-nghia.vercel.app",
+      "https://api-be-hanetby-nghia.vercel.app"
     ],
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    credentials: true,
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
   })
 );
 app.use(express.json());
