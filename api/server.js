@@ -526,38 +526,41 @@ app.post("/api/oauth/activate/:name", async (req, res) => {
     
     // Báo cáo nếu có lỗi nhưng không ngừng tiến trình
     if (setActiveResult.status === 'rejected') {
-      console.error(`[${requestId}] Lỗi khi đặt cấu hình active:`, setActiveResult.reason?.message || 'Unknown error');
+      console.error(`[${requestId}] Lỗi khi đặt cấu hình active:`, setActiveResult.reason);
     }
     
     if (setDynamicResult.status === 'rejected') {
-      console.error(`[${requestId}] Lỗi khi cập nhật cấu hình:`, setDynamicResult.reason?.message || 'Unknown error');
+      console.error(`[${requestId}] Lỗi khi cập nhật cấu hình tokenManager:`, setDynamicResult.reason);
     }
     
-    // Đặt tài khoản hiện tại (không cần đợi)
-    tokenManager.useAccount(configName);
-    
-    console.log(`[${requestId}] Đã kích hoạt cấu hình ${configName} thành công`);
-    
-    // Trả kết quả ngay mà không chờ làm mới token
-    const response = {
+    // Sử dụng bộ xác thực token mới để kiểm tra tính hợp lệ thực tế của token
+    // Trả về kết quả nhanh chóng trước, và tiếp tục kiểm tra token trong background
+    const responseData = {
       success: true,
-      message: `Đã kích hoạt cấu hình: ${configName}`,
-      auth: {
-        status: "configured",
-        message: "Đã cấu hình, đang kiểm tra token"
-      }
+      message: `Đã kích hoạt cấu hình ${configName}`,
+      configName: configName,
+      tokenValidationPending: true // Cho client biết token đang được kiểm tra trong background
     };
     
-    // Gửi response trước, sau đó thử làm mới token trong background
-    res.status(200).json(response);
+    // Trả kết quả nhanh cho client trước
+    res.status(200).json(responseData);
     
-    // Làm mới token trong background sau khi đã trả response
+    // Tiếp tục kiểm tra token trong background (sau khi đã trả response)
     try {
-      console.log(`[${requestId}] Background: Đang làm mới token với cấu hình ${configName}...`);
-      await tokenManager.getValidHanetToken();
-      console.log(`[${requestId}] Background: Làm mới token thành công`);
+      // Import bộ xác thực token
+      const tokenValidator = require('./tokenValidator');
+      
+      console.log(`[${requestId}] Kiểm tra xác thực token với Hanet API trong background...`);
+      const validToken = await tokenValidator.getVerifiedToken();
+      
+      if (validToken) {
+        console.log(`[${requestId}] Xác thực với Hanet thành công cho cấu hình ${configName}`);
+      } else {
+        console.error(`[${requestId}] Không nhận được token hợp lệ từ Hanet API`);
+      }
     } catch (tokenError) {
-      console.error(`[${requestId}] Background: Lỗi khi làm mới token:`, tokenError.message);
+      console.error(`[${requestId}] Lỗi khi xác thực với Hanet API:`, tokenError.message);
+      // Vì response đã được gửi, chúng ta chỉ log lỗi và không làm gì thêm
     }
     
     return; // Đã gửi response, không cần return gì thêm
@@ -1050,6 +1053,112 @@ app.post("/api/oauth/config/:name/sync-places", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Lỗi khi đồng bộ places: " + error.message
+    });
+  }
+});
+
+// API kiểm tra trạng thái OAuth
+app.get("/api/oauth/status", async (req, res) => {
+  const requestId = `status-${Date.now().toString(36)}`;
+  console.log(`[${requestId}] Kiểm tra trạng thái OAuth...`);
+  
+  // Kiểm tra xem có cấu hình active nào không
+  try {
+    // Lấy cấu hình active
+    let activeConfigData = null;
+    
+    try {
+      activeConfigData = await mongodbStorage.getActiveConfig();
+    } catch (dbError) {
+      console.error(`[${requestId}] Lỗi khi truy vấn cấu hình active:`, dbError);
+      return res.status(500).json({
+        success: false,
+        message: "Lỗi khi lấy cấu hình từ cơ sở dữ liệu"
+      });
+    }
+    
+    if (!activeConfigData || !activeConfigData.configName) {
+      return res.json({
+        success: true,
+        authenticated: false,
+        hasActiveConfig: false,
+        message: "Chưa có cấu hình OAuth nào được kích hoạt"
+      });
+    }
+    
+    // Lấy thông tin cấu hình
+    let config;
+    try {
+      config = await mongodbStorage.getOAuthConfig(activeConfigData.configName);
+    } catch (configError) {
+      console.error(`[${requestId}] Lỗi khi lấy thông tin cấu hình:`, configError);
+      return res.status(500).json({
+        success: false,
+        message: `Lỗi khi lấy thông tin cấu hình ${activeConfigData.configName}`
+      });
+    }
+    
+    if (!config) {
+      return res.json({
+        success: true,
+        authenticated: false,
+        hasActiveConfig: true,
+        configName: activeConfigData.configName,
+        message: `Cấu hình ${activeConfigData.configName} không tồn tại`
+      });
+    }
+    
+    // Đặt cấu hình vào tokenManager
+    await tokenManager.setDynamicConfig(config);
+    
+    // Sử dụng bộ xác thực token mới để kiểm tra tính hợp lệ thực tế của token
+    try {
+      // Import bộ xác thực token
+      const tokenValidator = require('./tokenValidator');
+      
+      // Lấy token đã được xác minh
+      console.log(`[${requestId}] Kiểm tra xác thực token với Hanet API...`);
+      const token = await tokenValidator.getVerifiedToken();
+      
+      const authenticatedData = {
+        success: true,
+        authenticated: true,
+        hasActiveConfig: true,
+        configName: activeConfigData.configName,
+        message: `Đã xác thực với tài khoản Hanet: ${config.appName || config.clientId}`,
+        data: {
+          appName: config.appName,
+          createdAt: config.createdAt,
+          updatedAt: config.updatedAt,
+          // Che dấu thông tin nhạy cảm
+          clientId: config.clientId ? `${config.clientId.substring(0, 4)}...${config.clientId.substring(config.clientId.length - 4)}` : 'N/A',
+          clientSecret: config.clientSecret ? `${config.clientSecret.substring(0, 2)}...${config.clientSecret.substring(config.clientSecret.length - 2)}` : 'N/A',
+          tokenUrl: config.tokenUrl || "https://oauth.hanet.com/token",
+          baseUrl: config.baseUrl || "https://partner.hanet.ai",
+          refreshToken: config.refreshToken ? `${config.refreshToken.substring(0, 4)}...${config.refreshToken.substring(config.refreshToken.length - 4)}` : 'N/A',
+          tokenVerified: true // Thêm trường này để chỉ ra rằng token đã được xác minh với API
+        }
+      };
+      
+      return res.json(authenticatedData);
+    } catch (tokenError) {
+      console.error(`[${requestId}] Lỗi khi kiểm tra token:`, tokenError);
+      
+      return res.json({
+        success: false,
+        authenticated: false,
+        hasActiveConfig: true,
+        configName: activeConfigData.configName,
+        message: `Lỗi xác thực với Hanet API: ${tokenError.message}`,
+        error: tokenError.message
+      });
+    }
+  } catch (error) {
+    console.error(`[${requestId}] Lỗi khi kiểm tra trạng thái OAuth:`, error);
+    
+    return res.status(500).json({
+      success: false,
+      message: `Lỗi khi kiểm tra trạng thái OAuth: ${error.message}`
     });
   }
 });
