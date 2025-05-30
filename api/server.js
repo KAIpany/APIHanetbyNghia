@@ -1108,11 +1108,65 @@ app.use((err, req, res, next) => {
   });
 });
 
-if (process.env.PORT !== "production") {
+// Thiết lập cơ chế tự động làm mới token mỗi 12 giờ
+let tokenRefreshInterval;
+
+async function setupTokenRefreshCron() {
+  // Hủy interval cũ nếu có
+  if (tokenRefreshInterval) {
+    clearInterval(tokenRefreshInterval);
+  }
+  
+  // Lấy cấu hình active
+  try {
+    const activeConfig = await tokenStorage.getActiveConfig();
+    if (activeConfig && activeConfig.configName) {
+      console.log(`[AUTO-REFRESH] Thiết lập cron job làm mới token tự động cho cấu hình: ${activeConfig.configName}`);
+      
+      // Làm mới token ngay lập tức
+      try {
+        await tokenManager.getValidHanetToken();
+        console.log(`[AUTO-REFRESH] Đã làm mới token ban đầu thành công`);
+      } catch (refreshError) {
+        console.error(`[AUTO-REFRESH] Lỗi khi làm mới token ban đầu:`, refreshError.message);
+      }
+      
+      // Thiết lập interval làm mới token mỗi 12 giờ
+      // 12 giờ = 12 * 60 * 60 * 1000 = 43200000 ms
+      tokenRefreshInterval = setInterval(async () => {
+        const requestId = `auto-refresh-${Date.now()}`;
+        console.log(`[${requestId}] [AUTO-REFRESH] Đang làm mới token tự động...`);
+        
+        try {
+          await tokenManager.getValidHanetToken();
+          console.log(`[${requestId}] [AUTO-REFRESH] Đã làm mới token tự động thành công`);
+        } catch (error) {
+          console.error(`[${requestId}] [AUTO-REFRESH] Lỗi khi làm mới token tự động:`, error.message);
+        }
+      }, 43200000); // 12 giờ
+      
+      console.log(`[AUTO-REFRESH] Đã thiết lập cron job làm mới token mỗi 12 giờ`);
+    } else {
+      console.log(`[AUTO-REFRESH] Không tìm thấy cấu hình active, không thiết lập cron job`);
+    }
+  } catch (error) {
+    console.error(`[AUTO-REFRESH] Lỗi khi thiết lập cron job:`, error.message);
+  }
+}
+
+// Khởi động server
+if (process.env.NODE_ENV !== "production") {
   app.listen(PORT, () => {
-    console.log(`Server đang lắng nghe trên cổng ${PORT}`);
+    console.log(`Server đang chạy trên cổng ${PORT}`);
     console.log(`Truy cập tại: http://localhost:${PORT}`);
+    
+    // Thiết lập cron job làm mới token
+    setupTokenRefreshCron();
   });
+} else {
+  // Chỉ xuất module trong môi trường production (Vercel)
+  // Tuy nhiên vẫn thiết lập cron job để duy trì kết nối
+  setupTokenRefreshCron();
 }
 
 module.exports = app;
