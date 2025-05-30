@@ -154,13 +154,13 @@ async function saveTokens(tokens) {
     console.log(`[${new Date().toISOString()}] Đã lưu token (có thể không bền vững nếu không có MongoDB)`);
     return true;
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Lỗi khi lưu token:`, error.message);
+    console.error(`[${new Date().toISOString()}] Lỗi khi lưu token cho tài khoản ${username}:`, error.message);
     return false;
   }
 }
 
 // ===== ĐỌC TOKEN CHÍNH =====
-async function loadTokens() {
+async function loadTokens(username = 'default') {
   try {
     // Tạo đối tượng kết quả ban đầu từ biến môi trường
     const envToken = process.env.HANET_REFRESH_TOKEN;
@@ -175,7 +175,7 @@ async function loadTokens() {
     // Đọc từ MongoDB (ưu tiên cao nhất)
     if (isMongoDB) {
       try {
-        const tokenData = await mongoDb.getToken('default');
+        const tokenData = await mongoDb.getToken(username);
         if (tokenData && tokenData.refreshToken) {
           console.log(`[${new Date().toISOString()}] Đã đọc token từ MongoDB thành công`);
           
@@ -225,7 +225,7 @@ async function loadTokens() {
         // Đồng bộ lại vào MongoDB nếu có thể
         if (isMongoDB) {
           try {
-            await mongoDb.saveToken('default', tmpTokens);
+            await mongoDb.saveToken(username, tmpTokens);
             console.log(`[${new Date().toISOString()}] Đã đồng bộ token từ file /tmp vào MongoDB`);
           } catch (syncError) {
             console.error(`[${new Date().toISOString()}] Lỗi khi đồng bộ token từ file /tmp vào MongoDB:`, syncError.message);
@@ -240,7 +240,7 @@ async function loadTokens() {
     console.log(`[${new Date().toISOString()}] Không tìm thấy token từ các nguồn lưu trữ, sử dụng giá trị từ env: ${envToken ? 'Có token' : 'Không có token'}`);
     return { refreshToken: envToken };
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Lỗi khi đọc token:`, error.message);
+    console.error(`[${new Date().toISOString()}] Lỗi khi đọc token từ các nguồn cho tài khoản ${username}:`, error.message);
     // Vẫn trả về token từ env nếu có
     return { refreshToken: process.env.HANET_REFRESH_TOKEN };
   }

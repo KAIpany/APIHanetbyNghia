@@ -4,6 +4,7 @@ import apiService from "./apiService";
 import OAuthConfig from "./OAuthConfig";
 import OAuthCallback from "./OAuthCallback";
 import { getAccounts, getCurrentAccount, setCurrentAccount, deleteAccount } from "./directAccountManager";
+import MultiAccountManager from "./MultiAccountManager";
 import "./App.css";
 
 // Thêm một trang Debug để xem thông tin localStorage
@@ -1093,60 +1094,22 @@ const CheckInApp = () => {
 
     return (
       <div className="account-menu" ref={accountMenuRef}>
-        <div className="account-menu-header">
-          <h3>Tài khoản</h3>
-          <button 
-            className="refresh-button"
-            onClick={(e) => {
-              e.stopPropagation();
-              tryCreateAccount();
-            }}
-            title="Làm mới tài khoản"
-          >
-            🔄
-          </button>
+        <div className="app-section auth-status-section">
+          <h3>Trạng thái xác thực</h3>
+          {renderAuthStatus()}
         </div>
         
-        <div className="account-menu-list">
-          {accounts && accounts.length > 0 ? (
-            accounts.map((account) => (
-              <div 
-                key={account.id} 
-                className="account-item"
-                onClick={() => handleAccountSelect(account)}
-              >
-                <div className="account-info">
-                  <div className="account-name">
-                    {account.name || 
-                     (account.userInfo && account.userInfo.name) || 
-                     (account.userInfo && account.userInfo.username) || 
-                     account.id || 'Người dùng'}
-                    
-                    {account.appName && (
-                      <span className="app-name-badge">
-                        {account.appName}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="no-accounts">
-              <p>Không có tài khoản nào</p>
-              <button
-                className="create-account-button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  tryCreateAccount();
-                }}
-              >
-                Tạo tài khoản mới
-              </button>
-            </div>
-          )}
-        </div>
-
+        <MultiAccountManager 
+          onAccountChange={(account) => {
+            if (account) {
+              console.log('Đã chuyển đổi tài khoản:', account.id);
+              fetchPlaces(); // Tải lại danh sách địa điểm với tài khoản mới
+              setAuthStatus('authenticated');
+              setShowAccountMenu(false); // Đóng menu sau khi chọn tài khoản
+            }
+          }} 
+        />
+        
         <div className="account-menu-footer">
           <div className="menu-actions">
             <Link to="/config" className="config-link">
@@ -1155,18 +1118,6 @@ const CheckInApp = () => {
             <Link to="/debug" className="debug-link">
               Debug
             </Link>
-          </div>
-          
-          <div className="add-account-section">
-            <button 
-              className="create-manual-account-button"
-              onClick={(e) => {
-                e.stopPropagation();
-                createManualAccount();
-              }}
-            >
-              + Tạo tài khoản thủ công
-            </button>
           </div>
         </div>
       </div>

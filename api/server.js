@@ -84,9 +84,14 @@ app.use((req, res, next) => {
   if (account) {
     try {
       tokenManager.useAccount(account);
+      // Thêm account vào req để dùng trong các route
+      req.currentAccount = account;
     } catch (e) {
       return res.status(400).json({ success: false, message: 'Không tìm thấy tài khoản: ' + account });
     }
+  } else {
+    // Mặc định sử dụng tài khoản 'default'
+    req.currentAccount = 'default';
   }
   next();
 });
@@ -133,9 +138,78 @@ app.get("/api", (req, res) => {
 });
 
 // 3. API Routes
+
+// API để truy vấn nhiều tài khoản cùng lúc
+app.get("/api/multi-account", async (req, res, next) => {
+  try {
+    const accounts = req.query.accounts ? req.query.accounts.split(',') : [];
+    const action = req.query.action || 'tokens';
+    
+    // Nếu không có tài khoản nào được chỉ định, lấy tất cả tài khoản
+    const targetAccounts = accounts.length > 0 ? accounts : tokenManager.getAllAccounts();
+    
+    console.log(`[${req.id}] Truy vấn dữ liệu cho ${targetAccounts.length} tài khoản: ${targetAccounts.join(', ')}`);
+    
+    if (action === 'tokens') {
+      // Lấy token cho tất cả các tài khoản
+      const tokens = {};
+      
+      await Promise.all(targetAccounts.map(async (account) => {
+        try {
+          const token = await tokenManager.getValidHanetToken(false, account);
+          tokens[account] = { success: true, token };
+        } catch (error) {
+          tokens[account] = { success: false, error: error.message };
+        }
+      }));
+      
+      res.status(200).json({
+        success: true,
+        accounts: targetAccounts,
+        tokens
+      });
+    } else if (action === 'config') {
+      // Lấy cấu hình cho tất cả các tài khoản
+      const configs = {};
+      
+      targetAccounts.forEach(account => {
+        try {
+          // Lấy cấu hình nhưng loại bỏ thông tin nhạy cảm
+          const config = tokenManager.getCurrentConfig(account);
+          configs[account] = {
+            success: true,
+            baseUrl: config.baseUrl,
+            tokenUrl: config.tokenUrl,
+            appName: config.appName,
+            hasRefreshToken: !!config.refreshToken,
+            hasClientId: !!config.clientId,
+            hasClientSecret: !!config.clientSecret,
+          };
+        } catch (error) {
+          configs[account] = { success: false, error: error.message };
+        }
+      });
+      
+      res.status(200).json({
+        success: true,
+        accounts: targetAccounts,
+        configs
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Hành động không hợp lệ. Hỗ trợ: 'tokens', 'config'"
+      });
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/people", async (req, res, next) => {
   try {
-    const peopleData = await hanetService.getPeopleListByPlace();
+    const account = req.currentAccount; // Sử dụng tài khoản được đặt bởi middleware
+    const peopleData = await hanetService.getPeopleListByPlace(null, account);
     res.status(200).json({ success: true, data: peopleData });
   } catch (error) {
     next(error);
